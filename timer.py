@@ -60,6 +60,8 @@ HTTP_HEADERS = {
 
 # Настройки
 APP_ID = "CrossoutCore.Timer"
+INSTANCE_MUTEX_NAME = f"Local\\{APP_ID}.Singleton"
+ERROR_ALREADY_EXISTS = 183
 TEST_MODE = False
 TEST_ALERT_SECONDS = 0.5
 ALERT_START_SECONDS = 0
@@ -122,6 +124,17 @@ GAME_QUANTITY_PLUS_X_RATIO = 0.523
 GAME_QUANTITY_PLUS_Y_RATIO = 0.512
 GAME_QUANTITY_MINUS_X_RATIO = 0.469
 GAME_QUANTITY_MINUS_Y_RATIO = 0.512
+GAME_SELL_BUTTON_X_RATIO = 0.366927
+GAME_SELL_BUTTON_Y_RATIO = 0.906944
+GAME_SELL_PRICE_CLICK_X_RATIO = 0.494792
+GAME_SELL_PRICE_CLICK_Y_RATIO = 0.376389
+GAME_SELL_ALL_BUTTON_X_RATIO = 0.577604
+GAME_SELL_ALL_BUTTON_Y_RATIO = 0.550926
+GAME_SELL_CONFIRM_BUTTON_X_RATIO = 0.517448
+GAME_SELL_CONFIRM_BUTTON_Y_RATIO = 0.694444
+GAME_SELL_CONFIRM_HOLD_SECONDS = 1.0
+GAME_SELL_STEP_DELAY_SECONDS = 0.050
+GAME_ORDER_TO_SELL_DELAY_SECONDS = 0.12
 GAME_OPEN_TO_BUY_DELAY_SECONDS = 0.20
 GAME_BUY_TO_QUANTITY_DELAY_SECONDS = 0.12
 GAME_MARKET_TAB_X_RATIO = 0.383
@@ -129,30 +142,44 @@ GAME_MARKET_TAB_Y_RATIO = 0.033
 GAME_DETAILS_TAB_X_RATIO = 0.421
 GAME_DETAILS_TAB_Y_RATIO = 0.088
 GAME_SECTION_CLICK_DELAY_SECONDS = 0.045
-SALVAGE_STORAGE_TAB_X_RATIO = 0.424
-SALVAGE_STORAGE_TAB_Y_RATIO = 0.035
-SALVAGE_DECOR_CATEGORY_X_RATIO = 0.346
-SALVAGE_DECOR_CATEGORY_Y_RATIO = 0.181
-SALVAGE_SORT_DROPDOWN_X_RATIO = 0.887
-SALVAGE_SORT_DROPDOWN_Y_RATIO = 0.181
-SALVAGE_SORT_NEW_OPTION_X_RATIO = 0.888
-SALVAGE_SORT_NEW_OPTION_Y_RATIO = 0.466
-SALVAGE_FIRST_ITEM_X_RATIO = 0.074
-SALVAGE_FIRST_ITEM_Y_RATIO = 0.240
+SALVAGE_STORAGE_TAB_X_RATIO = 0.430729
+SALVAGE_STORAGE_TAB_Y_RATIO = 0.036574
+SALVAGE_DETAILS_TAB_X_RATIO = 0.327083
+SALVAGE_DETAILS_TAB_Y_RATIO = 0.083796
+SALVAGE_PRE_DECOR_CATEGORY_X_RATIO = 0.423958
+SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO = 0.168519
+SALVAGE_DECOR_CATEGORY_X_RATIO = 0.341406
+SALVAGE_DECOR_CATEGORY_Y_RATIO = 0.168519
+SALVAGE_SORT_DROPDOWN_X_RATIO = 0.890365
+SALVAGE_SORT_DROPDOWN_Y_RATIO = 0.169907
+SALVAGE_SORT_NEW_OPTION_X_RATIO = 0.876563
+SALVAGE_SORT_NEW_OPTION_Y_RATIO = 0.435185
+SALVAGE_SORT_TYPE_OPTION_X_RATIO = 0.877865
+SALVAGE_SORT_TYPE_OPTION_Y_RATIO = 0.215278
+SALVAGE_FIRST_ITEM_X_RATIO = 0.066927
+SALVAGE_FIRST_ITEM_Y_RATIO = 0.319907
+SALVAGE_SELECT_ITEM_X_RATIO = 0.066927
+SALVAGE_SELECT_ITEM_Y_RATIO = 0.319907
 SALVAGE_ITEM_ROW_STEP_RATIO = 0.233
-SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO = 0.096
-SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO = 0.573
-SALVAGE_ALL_BUTTON_X_RATIO = 0.503
-SALVAGE_ALL_BUTTON_Y_RATIO = 0.471
-SALVAGE_CONFIRM_BUTTON_X_RATIO = 0.500
-SALVAGE_CONFIRM_BUTTON_Y_RATIO = 0.681
-SALVAGE_CONFIRM_HOLD_SECONDS = 1.0
-SALVAGE_CONFIRM_WAIT_SECONDS = 0.42
-SALVAGE_AFTER_CONFIRM_SECONDS = 0.35
+SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO = 0.059896
+SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO = 0.608796
+SALVAGE_ALL_BUTTON_X_RATIO = 0.503646
+SALVAGE_ALL_BUTTON_Y_RATIO = 0.471759
+SALVAGE_CONFIRM_BUTTON_X_RATIO = 0.500260
+SALVAGE_CONFIRM_BUTTON_Y_RATIO = 0.680093
+SALVAGE_CONFIRM_HOLD_SECONDS = 0.564
+SALVAGE_CONFIRM_WAIT_SECONDS = 0.25
+SALVAGE_AFTER_CONFIRM_SECONDS = 0.12
 SALVAGE_STEP_DELAY_SECONDS = 0.035
-PICKER_OPEN_HOLD_SECONDS = 0.20
+SALVAGE_ITEM_HOVER_DELAY_SECONDS = 0.03
+SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS = 0.08
+SALVAGE_POST_MENU_CLICK_DELAY_SECONDS = 0.08
+SALVAGE_POST_ALL_CLICK_DELAY_SECONDS = 0.04
+SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS = 12
+PICKER_OPEN_HOLD_SECONDS = 0.14
 PICKER_END_RELEASE_GRACE_SECONDS = 0.05
 RIGHT_ARROW_HOLD_SECONDS = 0.09
+PICKER_ARROW_EDGE_HOLD_SECONDS = 0.20
 MARKET_ACTION_STAGE_MAX_AGE_SECONDS = 1.10
 GAME_BUTTON_SAMPLE_OFFSETS = (
     (-70, -10),
@@ -324,6 +351,17 @@ DEFAULT_SETTINGS = {
         "quantity_plus_y_ratio": GAME_QUANTITY_PLUS_Y_RATIO,
         "quantity_minus_x_ratio": GAME_QUANTITY_MINUS_X_RATIO,
         "quantity_minus_y_ratio": GAME_QUANTITY_MINUS_Y_RATIO,
+        "sell_button_x_ratio": GAME_SELL_BUTTON_X_RATIO,
+        "sell_button_y_ratio": GAME_SELL_BUTTON_Y_RATIO,
+        "sell_price_click_x_ratio": GAME_SELL_PRICE_CLICK_X_RATIO,
+        "sell_price_click_y_ratio": GAME_SELL_PRICE_CLICK_Y_RATIO,
+        "sell_all_button_x_ratio": GAME_SELL_ALL_BUTTON_X_RATIO,
+        "sell_all_button_y_ratio": GAME_SELL_ALL_BUTTON_Y_RATIO,
+        "sell_confirm_button_x_ratio": GAME_SELL_CONFIRM_BUTTON_X_RATIO,
+        "sell_confirm_button_y_ratio": GAME_SELL_CONFIRM_BUTTON_Y_RATIO,
+        "sell_confirm_hold_seconds": GAME_SELL_CONFIRM_HOLD_SECONDS,
+        "sell_step_delay_seconds": GAME_SELL_STEP_DELAY_SECONDS,
+        "order_to_sell_delay_seconds": GAME_ORDER_TO_SELL_DELAY_SECONDS,
         "open_to_buy_delay_seconds": GAME_OPEN_TO_BUY_DELAY_SECONDS,
         "buy_to_quantity_delay_seconds": GAME_BUY_TO_QUANTITY_DELAY_SECONDS,
         "market_tab_x_ratio": GAME_MARKET_TAB_X_RATIO,
@@ -333,14 +371,22 @@ DEFAULT_SETTINGS = {
         "section_click_delay_seconds": GAME_SECTION_CLICK_DELAY_SECONDS,
         "salvage_storage_tab_x_ratio": SALVAGE_STORAGE_TAB_X_RATIO,
         "salvage_storage_tab_y_ratio": SALVAGE_STORAGE_TAB_Y_RATIO,
+        "salvage_details_tab_x_ratio": SALVAGE_DETAILS_TAB_X_RATIO,
+        "salvage_details_tab_y_ratio": SALVAGE_DETAILS_TAB_Y_RATIO,
+        "salvage_pre_decor_category_x_ratio": SALVAGE_PRE_DECOR_CATEGORY_X_RATIO,
+        "salvage_pre_decor_category_y_ratio": SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO,
         "salvage_decor_category_x_ratio": SALVAGE_DECOR_CATEGORY_X_RATIO,
         "salvage_decor_category_y_ratio": SALVAGE_DECOR_CATEGORY_Y_RATIO,
         "salvage_sort_dropdown_x_ratio": SALVAGE_SORT_DROPDOWN_X_RATIO,
         "salvage_sort_dropdown_y_ratio": SALVAGE_SORT_DROPDOWN_Y_RATIO,
         "salvage_sort_new_option_x_ratio": SALVAGE_SORT_NEW_OPTION_X_RATIO,
         "salvage_sort_new_option_y_ratio": SALVAGE_SORT_NEW_OPTION_Y_RATIO,
+        "salvage_sort_type_option_x_ratio": SALVAGE_SORT_TYPE_OPTION_X_RATIO,
+        "salvage_sort_type_option_y_ratio": SALVAGE_SORT_TYPE_OPTION_Y_RATIO,
         "salvage_first_item_x_ratio": SALVAGE_FIRST_ITEM_X_RATIO,
         "salvage_first_item_y_ratio": SALVAGE_FIRST_ITEM_Y_RATIO,
+        "salvage_select_item_x_ratio": SALVAGE_SELECT_ITEM_X_RATIO,
+        "salvage_select_item_y_ratio": SALVAGE_SELECT_ITEM_Y_RATIO,
         "salvage_item_row_step_ratio": SALVAGE_ITEM_ROW_STEP_RATIO,
         "salvage_context_disassemble_x_ratio": SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO,
         "salvage_context_disassemble_y_ratio": SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO,
@@ -352,6 +398,11 @@ DEFAULT_SETTINGS = {
         "salvage_confirm_wait_seconds": SALVAGE_CONFIRM_WAIT_SECONDS,
         "salvage_after_confirm_seconds": SALVAGE_AFTER_CONFIRM_SECONDS,
         "salvage_step_delay_seconds": SALVAGE_STEP_DELAY_SECONDS,
+        "salvage_item_hover_delay_seconds": SALVAGE_ITEM_HOVER_DELAY_SECONDS,
+        "salvage_post_right_click_delay_seconds": SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS,
+        "salvage_post_menu_click_delay_seconds": SALVAGE_POST_MENU_CLICK_DELAY_SECONDS,
+        "salvage_post_all_click_delay_seconds": SALVAGE_POST_ALL_CLICK_DELAY_SECONDS,
+        "salvage_mouse_cancel_threshold_pixels": SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS,
         "picker_open_hold_seconds": PICKER_OPEN_HOLD_SECONDS,
         "picker_end_release_grace_seconds": PICKER_END_RELEASE_GRACE_SECONDS,
         "right_arrow_hold_seconds": RIGHT_ARROW_HOLD_SECONDS,
@@ -392,20 +443,34 @@ def apply_settings():
     global GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO
     global GAME_QUANTITY_PLUS_X_RATIO, GAME_QUANTITY_PLUS_Y_RATIO
     global GAME_QUANTITY_MINUS_X_RATIO, GAME_QUANTITY_MINUS_Y_RATIO
+    global GAME_SELL_BUTTON_X_RATIO, GAME_SELL_BUTTON_Y_RATIO
+    global GAME_SELL_PRICE_CLICK_X_RATIO, GAME_SELL_PRICE_CLICK_Y_RATIO
+    global GAME_SELL_ALL_BUTTON_X_RATIO, GAME_SELL_ALL_BUTTON_Y_RATIO
+    global GAME_SELL_CONFIRM_BUTTON_X_RATIO, GAME_SELL_CONFIRM_BUTTON_Y_RATIO
+    global GAME_SELL_CONFIRM_HOLD_SECONDS, GAME_SELL_STEP_DELAY_SECONDS
+    global GAME_ORDER_TO_SELL_DELAY_SECONDS
     global GAME_OPEN_TO_BUY_DELAY_SECONDS, GAME_BUY_TO_QUANTITY_DELAY_SECONDS
     global GAME_MARKET_TAB_X_RATIO, GAME_MARKET_TAB_Y_RATIO
     global GAME_DETAILS_TAB_X_RATIO, GAME_DETAILS_TAB_Y_RATIO
     global GAME_SECTION_CLICK_DELAY_SECONDS, PICKER_OPEN_HOLD_SECONDS
     global SALVAGE_STORAGE_TAB_X_RATIO, SALVAGE_STORAGE_TAB_Y_RATIO
+    global SALVAGE_DETAILS_TAB_X_RATIO, SALVAGE_DETAILS_TAB_Y_RATIO
+    global SALVAGE_PRE_DECOR_CATEGORY_X_RATIO, SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO
     global SALVAGE_DECOR_CATEGORY_X_RATIO, SALVAGE_DECOR_CATEGORY_Y_RATIO
     global SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO
     global SALVAGE_SORT_NEW_OPTION_X_RATIO, SALVAGE_SORT_NEW_OPTION_Y_RATIO
-    global SALVAGE_FIRST_ITEM_X_RATIO, SALVAGE_FIRST_ITEM_Y_RATIO, SALVAGE_ITEM_ROW_STEP_RATIO
+    global SALVAGE_SORT_TYPE_OPTION_X_RATIO, SALVAGE_SORT_TYPE_OPTION_Y_RATIO
+    global SALVAGE_FIRST_ITEM_X_RATIO, SALVAGE_FIRST_ITEM_Y_RATIO
+    global SALVAGE_SELECT_ITEM_X_RATIO, SALVAGE_SELECT_ITEM_Y_RATIO
+    global SALVAGE_ITEM_ROW_STEP_RATIO
     global SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO, SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO
     global SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO
     global SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO
     global SALVAGE_CONFIRM_HOLD_SECONDS, SALVAGE_CONFIRM_WAIT_SECONDS
     global SALVAGE_AFTER_CONFIRM_SECONDS, SALVAGE_STEP_DELAY_SECONDS
+    global SALVAGE_ITEM_HOVER_DELAY_SECONDS, SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS
+    global SALVAGE_POST_MENU_CLICK_DELAY_SECONDS, SALVAGE_POST_ALL_CLICK_DELAY_SECONDS
+    global SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS
     global PICKER_END_RELEASE_GRACE_SECONDS, RIGHT_ARROW_HOLD_SECONDS
     global MARKET_ACTION_STAGE_MAX_AGE_SECONDS
     global RIGHT_SHIFT_POLL_SECONDS
@@ -519,6 +584,39 @@ def apply_settings():
     GAME_QUANTITY_MINUS_Y_RATIO = float(
         setting(settings, "game_actions.quantity_minus_y_ratio", GAME_QUANTITY_MINUS_Y_RATIO)
     )
+    GAME_SELL_BUTTON_X_RATIO = float(
+        setting(settings, "game_actions.sell_button_x_ratio", GAME_SELL_BUTTON_X_RATIO)
+    )
+    GAME_SELL_BUTTON_Y_RATIO = float(
+        setting(settings, "game_actions.sell_button_y_ratio", GAME_SELL_BUTTON_Y_RATIO)
+    )
+    GAME_SELL_PRICE_CLICK_X_RATIO = float(
+        setting(settings, "game_actions.sell_price_click_x_ratio", GAME_SELL_PRICE_CLICK_X_RATIO)
+    )
+    GAME_SELL_PRICE_CLICK_Y_RATIO = float(
+        setting(settings, "game_actions.sell_price_click_y_ratio", GAME_SELL_PRICE_CLICK_Y_RATIO)
+    )
+    GAME_SELL_ALL_BUTTON_X_RATIO = float(
+        setting(settings, "game_actions.sell_all_button_x_ratio", GAME_SELL_ALL_BUTTON_X_RATIO)
+    )
+    GAME_SELL_ALL_BUTTON_Y_RATIO = float(
+        setting(settings, "game_actions.sell_all_button_y_ratio", GAME_SELL_ALL_BUTTON_Y_RATIO)
+    )
+    GAME_SELL_CONFIRM_BUTTON_X_RATIO = float(
+        setting(settings, "game_actions.sell_confirm_button_x_ratio", GAME_SELL_CONFIRM_BUTTON_X_RATIO)
+    )
+    GAME_SELL_CONFIRM_BUTTON_Y_RATIO = float(
+        setting(settings, "game_actions.sell_confirm_button_y_ratio", GAME_SELL_CONFIRM_BUTTON_Y_RATIO)
+    )
+    GAME_SELL_CONFIRM_HOLD_SECONDS = float(
+        setting(settings, "game_actions.sell_confirm_hold_seconds", GAME_SELL_CONFIRM_HOLD_SECONDS)
+    )
+    GAME_SELL_STEP_DELAY_SECONDS = float(
+        setting(settings, "game_actions.sell_step_delay_seconds", GAME_SELL_STEP_DELAY_SECONDS)
+    )
+    GAME_ORDER_TO_SELL_DELAY_SECONDS = float(
+        setting(settings, "game_actions.order_to_sell_delay_seconds", GAME_ORDER_TO_SELL_DELAY_SECONDS)
+    )
     GAME_OPEN_TO_BUY_DELAY_SECONDS = float(
         setting(settings, "game_actions.open_to_buy_delay_seconds", GAME_OPEN_TO_BUY_DELAY_SECONDS)
     )
@@ -546,6 +644,26 @@ def apply_settings():
     SALVAGE_STORAGE_TAB_Y_RATIO = float(
         setting(settings, "game_actions.salvage_storage_tab_y_ratio", SALVAGE_STORAGE_TAB_Y_RATIO)
     )
+    SALVAGE_DETAILS_TAB_X_RATIO = float(
+        setting(settings, "game_actions.salvage_details_tab_x_ratio", SALVAGE_DETAILS_TAB_X_RATIO)
+    )
+    SALVAGE_DETAILS_TAB_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_details_tab_y_ratio", SALVAGE_DETAILS_TAB_Y_RATIO)
+    )
+    SALVAGE_PRE_DECOR_CATEGORY_X_RATIO = float(
+        setting(
+            settings,
+            "game_actions.salvage_pre_decor_category_x_ratio",
+            SALVAGE_PRE_DECOR_CATEGORY_X_RATIO,
+        )
+    )
+    SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO = float(
+        setting(
+            settings,
+            "game_actions.salvage_pre_decor_category_y_ratio",
+            SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO,
+        )
+    )
     SALVAGE_DECOR_CATEGORY_X_RATIO = float(
         setting(settings, "game_actions.salvage_decor_category_x_ratio", SALVAGE_DECOR_CATEGORY_X_RATIO)
     )
@@ -564,11 +682,31 @@ def apply_settings():
     SALVAGE_SORT_NEW_OPTION_Y_RATIO = float(
         setting(settings, "game_actions.salvage_sort_new_option_y_ratio", SALVAGE_SORT_NEW_OPTION_Y_RATIO)
     )
+    SALVAGE_SORT_TYPE_OPTION_X_RATIO = float(
+        setting(
+            settings,
+            "game_actions.salvage_sort_type_option_x_ratio",
+            SALVAGE_SORT_TYPE_OPTION_X_RATIO,
+        )
+    )
+    SALVAGE_SORT_TYPE_OPTION_Y_RATIO = float(
+        setting(
+            settings,
+            "game_actions.salvage_sort_type_option_y_ratio",
+            SALVAGE_SORT_TYPE_OPTION_Y_RATIO,
+        )
+    )
     SALVAGE_FIRST_ITEM_X_RATIO = float(
         setting(settings, "game_actions.salvage_first_item_x_ratio", SALVAGE_FIRST_ITEM_X_RATIO)
     )
     SALVAGE_FIRST_ITEM_Y_RATIO = float(
         setting(settings, "game_actions.salvage_first_item_y_ratio", SALVAGE_FIRST_ITEM_Y_RATIO)
+    )
+    SALVAGE_SELECT_ITEM_X_RATIO = float(
+        setting(settings, "game_actions.salvage_select_item_x_ratio", SALVAGE_SELECT_ITEM_X_RATIO)
+    )
+    SALVAGE_SELECT_ITEM_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_select_item_y_ratio", SALVAGE_SELECT_ITEM_Y_RATIO)
     )
     SALVAGE_ITEM_ROW_STEP_RATIO = float(
         setting(settings, "game_actions.salvage_item_row_step_ratio", SALVAGE_ITEM_ROW_STEP_RATIO)
@@ -602,6 +740,41 @@ def apply_settings():
     )
     SALVAGE_STEP_DELAY_SECONDS = float(
         setting(settings, "game_actions.salvage_step_delay_seconds", SALVAGE_STEP_DELAY_SECONDS)
+    )
+    SALVAGE_ITEM_HOVER_DELAY_SECONDS = float(
+        setting(
+            settings,
+            "game_actions.salvage_item_hover_delay_seconds",
+            SALVAGE_ITEM_HOVER_DELAY_SECONDS,
+        )
+    )
+    SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS = float(
+        setting(
+            settings,
+            "game_actions.salvage_post_right_click_delay_seconds",
+            SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS,
+        )
+    )
+    SALVAGE_POST_MENU_CLICK_DELAY_SECONDS = float(
+        setting(
+            settings,
+            "game_actions.salvage_post_menu_click_delay_seconds",
+            SALVAGE_POST_MENU_CLICK_DELAY_SECONDS,
+        )
+    )
+    SALVAGE_POST_ALL_CLICK_DELAY_SECONDS = float(
+        setting(
+            settings,
+            "game_actions.salvage_post_all_click_delay_seconds",
+            SALVAGE_POST_ALL_CLICK_DELAY_SECONDS,
+        )
+    )
+    SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS = int(
+        setting(
+            settings,
+            "game_actions.salvage_mouse_cancel_threshold_pixels",
+            SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS,
+        )
     )
     PICKER_OPEN_HOLD_SECONDS = float(
         setting(settings, "game_actions.picker_open_hold_seconds", PICKER_OPEN_HOLD_SECONDS)
@@ -656,6 +829,8 @@ SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
 SWP_FRAMECHANGED = 0x0020
 SW_SHOWNOACTIVATE = 4
+SW_SHOW = 5
+SW_RESTORE = 9
 MONITORINFOF_PRIMARY = 1
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 INPUT_MOUSE = 0
@@ -805,6 +980,12 @@ right_arrow_press_at = 0
 right_arrow_hold_active = False
 right_arrow_hold_compensated = False
 right_arrow_last_action_stage = None
+up_arrow_was_down = False
+up_arrow_press_at = 0
+up_arrow_hold_triggered = False
+down_arrow_was_down = False
+down_arrow_press_at = 0
+down_arrow_hold_triggered = False
 picker_end_hold_pending = False
 picker_end_hold_consumed = False
 picker_end_press_active = False
@@ -815,6 +996,7 @@ picker_end_press_at = 0
 picker_end_ignore_until = 0
 salvage_running = False
 salvage_stop_event = threading.Event()
+salvage_expected_cursor_pos = None
 market_action_stage = "open_card"
 market_action_stage_ready_at = 0
 market_action_stage_updated_at = 0
@@ -822,6 +1004,7 @@ picker_render_signature = None
 last_picker_paste_at = 0
 last_picker_paste_name = None
 last_alert_context_hwnd = None
+single_instance_mutex = None
 overlay_width = BASE_NOTCH_WIDTH
 notch_x = 0
 notch_width = BASE_NOTCH_WIDTH
@@ -861,6 +1044,22 @@ def log_error(key, message):
 
     last_log_times[key] = now
     append_log_line(message)
+
+
+def acquire_single_instance():
+    global single_instance_mutex
+
+    try:
+        kernel32 = ctypes.windll.kernel32
+        mutex = kernel32.CreateMutexW(None, False, INSTANCE_MUTEX_NAME)
+        if not mutex:
+            return
+
+        single_instance_mutex = mutex
+        if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            os._exit(0)
+    except Exception as e:
+        log_error("single_instance", f"Single instance guard failed: {e}")
 
 
 def parse_local_storage_value(data, keys):
@@ -2114,6 +2313,48 @@ def get_foreground_hwnd():
         return 0
 
 
+def is_live_window(hwnd):
+    if not hwnd:
+        return False
+
+    try:
+        return bool(ctypes.windll.user32.IsWindow(hwnd))
+    except Exception:
+        return False
+
+
+def is_live_game_window(hwnd):
+    return is_live_window(hwnd) and is_game_window(hwnd)
+
+
+def clear_dead_picker_targets():
+    global picker_target_hwnd, last_alert_context_hwnd
+
+    if picker_target_hwnd and not is_live_game_window(picker_target_hwnd):
+        picker_target_hwnd = None
+
+    if last_alert_context_hwnd and not is_live_window(last_alert_context_hwnd):
+        last_alert_context_hwnd = None
+
+
+def close_picker_if_target_gone():
+    global picker_target_hwnd
+
+    if not picker_target_hwnd:
+        if is_picker_open():
+            hide_picker()
+            return True
+        return False
+
+    if is_live_game_window(picker_target_hwnd):
+        return False
+
+    picker_target_hwnd = None
+    if is_picker_open():
+        hide_picker()
+    return True
+
+
 def is_own_overlay_hwnd(hwnd):
     if not hwnd:
         return False
@@ -2266,6 +2507,73 @@ def is_game_foreground():
     return is_game_window(get_foreground_hwnd())
 
 
+def find_game_window():
+    found_hwnds = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def enum_proc(hwnd, _lparam):
+        if hwnd and is_game_window(hwnd):
+            found_hwnds.append(hwnd)
+            return False
+        return True
+
+    try:
+        ctypes.windll.user32.EnumWindows(enum_proc, 0)
+    except Exception as e:
+        log_error("game_window", f"EnumWindows failed: {e}")
+
+    return found_hwnds[0] if found_hwnds else 0
+
+
+def restore_game_window(hwnd):
+    if not hwnd:
+        return False
+
+    user32 = ctypes.windll.user32
+    try:
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            time.sleep(0.10)
+        else:
+            user32.ShowWindow(hwnd, SW_SHOW)
+
+        if force_foreground_window(hwnd):
+            return True
+
+        time.sleep(0.06)
+        return bool(force_foreground_window(hwnd) or is_game_window(get_foreground_hwnd()))
+    except Exception as e:
+        log_error("game_window", f"Restore failed: {e}")
+        return False
+
+
+def get_or_restore_game_hwnd():
+    global picker_target_hwnd, last_alert_context_hwnd
+
+    foreground_hwnd = get_picker_action_hwnd()
+    if foreground_hwnd:
+        return foreground_hwnd
+
+    candidates = []
+    for hwnd in (picker_target_hwnd, last_alert_context_hwnd, find_game_window()):
+        if hwnd and hwnd not in candidates and is_game_window(hwnd):
+            candidates.append(hwnd)
+
+    for hwnd in candidates:
+        if restore_game_window(hwnd):
+            active_hwnd = get_foreground_hwnd()
+            if active_hwnd and is_game_window(active_hwnd):
+                picker_target_hwnd = active_hwnd
+                last_alert_context_hwnd = active_hwnd
+                return active_hwnd
+
+            picker_target_hwnd = hwnd
+            last_alert_context_hwnd = hwnd
+            return hwnd
+
+    return 0
+
+
 def is_window_on_primary_monitor(hwnd):
     try:
         window_rect = get_hwnd_rect(hwnd)
@@ -2393,7 +2701,43 @@ def send_mouse_right_click():
     return down_ok and up_ok
 
 
-def hold_left_mouse(seconds, stop_event=None):
+def get_cursor_pos():
+    point = POINT()
+    try:
+        if ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
+            return point.x, point.y
+    except Exception:
+        pass
+    return None
+
+
+def note_salvage_cursor_pos():
+    global salvage_expected_cursor_pos
+
+    salvage_expected_cursor_pos = get_cursor_pos()
+
+
+def mark_salvage_mouse_cancel(stop_event):
+    append_log_line("salvage stopped: mouse moved")
+    if stop_event is not None:
+        stop_event.set()
+
+
+def salvage_cursor_moved_by_user():
+    if salvage_expected_cursor_pos is None:
+        note_salvage_cursor_pos()
+        return False
+
+    current_pos = get_cursor_pos()
+    if current_pos is None:
+        return False
+
+    dx = abs(current_pos[0] - salvage_expected_cursor_pos[0])
+    dy = abs(current_pos[1] - salvage_expected_cursor_pos[1])
+    return dx > SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS or dy > SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS
+
+
+def hold_left_mouse(seconds, stop_event=None, mouse_guard=False):
     if not send_mouse_button(MOUSEEVENTF_LEFTDOWN):
         return False
 
@@ -2401,6 +2745,9 @@ def hold_left_mouse(seconds, stop_event=None):
         end_at = time.monotonic() + max(0, seconds)
         while time.monotonic() < end_at:
             if stop_event is not None and stop_event.is_set():
+                return False
+            if mouse_guard and salvage_cursor_moved_by_user():
+                mark_salvage_mouse_cancel(stop_event)
                 return False
             time.sleep(0.01)
         return True
@@ -2620,10 +2967,12 @@ def right_click_game_ratio(x_ratio, y_ratio):
     return send_mouse_right_click()
 
 
-def hold_game_ratio(x_ratio, y_ratio, seconds, stop_event=None):
+def hold_game_ratio(x_ratio, y_ratio, seconds, stop_event=None, mouse_guard=False):
     if not move_cursor_to_game_ratio(x_ratio, y_ratio):
         return False
-    return hold_left_mouse(seconds, stop_event=stop_event)
+    if mouse_guard:
+        note_salvage_cursor_pos()
+    return hold_left_mouse(seconds, stop_event=stop_event, mouse_guard=mouse_guard)
 
 
 def open_selected_market_card():
@@ -2694,8 +3043,8 @@ def get_market_action_stage():
 def handle_market_action_right():
     global right_arrow_last_action_stage
 
-    detected_stage = detect_market_action_stage()
     now = time.monotonic()
+    detected_stage = detect_market_action_stage()
 
     if detected_stage == "quantity":
         right_arrow_last_action_stage = "quantity"
@@ -2733,8 +3082,9 @@ def resolve_picker_end_hold():
 
     if is_virtual_key_down(VK_END):
         picker_end_hold_triggered = True
-        if get_picker_action_hwnd():
+        if get_or_restore_game_hwnd():
             open_game_market_details()
+            show_picker(toggle=False)
 
 
 def schedule_picker_end_hold_check():
@@ -2797,10 +3147,13 @@ def handle_right_ctrl_escape():
     return decrease_market_item_quantity()
 
 
-def sleep_with_stop(seconds, stop_event):
+def sleep_with_stop(seconds, stop_event, mouse_guard=False):
     end_at = time.monotonic() + max(0, seconds)
     while time.monotonic() < end_at:
         if stop_event.is_set():
+            return False
+        if mouse_guard and salvage_cursor_moved_by_user():
+            mark_salvage_mouse_cancel(stop_event)
             return False
         time.sleep(min(0.02, max(0, end_at - time.monotonic())))
     return not stop_event.is_set()
@@ -2811,12 +3164,48 @@ def salvage_click(x_ratio, y_ratio, stop_event, right=False):
         return False
     ok = right_click_game_ratio(x_ratio, y_ratio) if right else click_game_ratio(x_ratio, y_ratio)
     if ok:
-        sleep_with_stop(SALVAGE_STEP_DELAY_SECONDS, stop_event)
+        note_salvage_cursor_pos()
+        sleep_with_stop(SALVAGE_STEP_DELAY_SECONDS, stop_event, mouse_guard=True)
     return ok
+
+
+def salvage_click_no_stop(x_ratio, y_ratio):
+    if not get_picker_action_hwnd():
+        return False
+    ok = click_game_ratio(x_ratio, y_ratio)
+    if ok:
+        time.sleep(SALVAGE_STEP_DELAY_SECONDS)
+    return ok
+
+
+def salvage_right_click_item(x_ratio, y_ratio, stop_event):
+    if stop_event.is_set() or not get_picker_action_hwnd():
+        return False
+
+    if not move_cursor_to_game_ratio(x_ratio, y_ratio):
+        return False
+    note_salvage_cursor_pos()
+    if not sleep_with_stop(SALVAGE_ITEM_HOVER_DELAY_SECONDS, stop_event, mouse_guard=True):
+        return False
+    if not send_mouse_right_click():
+        return False
+    note_salvage_cursor_pos()
+    return sleep_with_stop(SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS, stop_event, mouse_guard=True)
 
 
 def salvage_confirm_available():
     return is_game_button_visible(SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO)
+
+
+def restore_salvage_sort_type():
+    if not get_picker_action_hwnd():
+        return False
+
+    opened = salvage_click_no_stop(SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO)
+    if not opened:
+        return False
+
+    return salvage_click_no_stop(SALVAGE_SORT_TYPE_OPTION_X_RATIO, SALVAGE_SORT_TYPE_OPTION_Y_RATIO)
 
 
 def run_salvage_loop(stop_event):
@@ -2832,6 +3221,14 @@ def run_salvage_loop(stop_event):
 
         if not salvage_click(SALVAGE_STORAGE_TAB_X_RATIO, SALVAGE_STORAGE_TAB_Y_RATIO, stop_event):
             return
+        if not salvage_click(SALVAGE_DETAILS_TAB_X_RATIO, SALVAGE_DETAILS_TAB_Y_RATIO, stop_event):
+            return
+        if not salvage_click(
+            SALVAGE_PRE_DECOR_CATEGORY_X_RATIO,
+            SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO,
+            stop_event,
+        ):
+            return
         if not salvage_click(SALVAGE_DECOR_CATEGORY_X_RATIO, SALVAGE_DECOR_CATEGORY_Y_RATIO, stop_event):
             return
         if not salvage_click(SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO, stop_event):
@@ -2841,7 +3238,7 @@ def run_salvage_loop(stop_event):
 
         item_y = SALVAGE_FIRST_ITEM_Y_RATIO
         while not stop_event.is_set() and get_picker_action_hwnd():
-            if not salvage_click(SALVAGE_FIRST_ITEM_X_RATIO, item_y, stop_event, right=True):
+            if not salvage_right_click_item(SALVAGE_FIRST_ITEM_X_RATIO, item_y, stop_event):
                 break
             if not salvage_click(
                 SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO,
@@ -2849,27 +3246,36 @@ def run_salvage_loop(stop_event):
                 stop_event,
             ):
                 break
+            if not sleep_with_stop(SALVAGE_POST_MENU_CLICK_DELAY_SECONDS, stop_event, mouse_guard=True):
+                break
 
-            if not sleep_with_stop(SALVAGE_CONFIRM_WAIT_SECONDS, stop_event):
+            if not sleep_with_stop(SALVAGE_CONFIRM_WAIT_SECONDS, stop_event, mouse_guard=True):
                 break
             if not salvage_confirm_available():
                 append_log_line("salvage stopped: confirm button not found")
                 break
 
-            salvage_click(SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO, stop_event)
+            if not salvage_click(SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO, stop_event):
+                break
+            if not sleep_with_stop(SALVAGE_POST_ALL_CLICK_DELAY_SECONDS, stop_event, mouse_guard=True):
+                break
             if not hold_game_ratio(
                 SALVAGE_CONFIRM_BUTTON_X_RATIO,
                 SALVAGE_CONFIRM_BUTTON_Y_RATIO,
                 SALVAGE_CONFIRM_HOLD_SECONDS,
                 stop_event=stop_event,
+                mouse_guard=True,
             ):
                 break
-            if not sleep_with_stop(SALVAGE_AFTER_CONFIRM_SECONDS, stop_event):
+            if not sleep_with_stop(SALVAGE_AFTER_CONFIRM_SECONDS, stop_event, mouse_guard=True):
                 break
     except Exception as e:
         log_error("salvage", f"Salvage loop failed: {e}")
     finally:
+        was_cancelled = stop_event.is_set()
         send_mouse_button(MOUSEEVENTF_LEFTUP)
+        if was_cancelled:
+            restore_salvage_sort_type()
         salvage_running = False
         stop_event.clear()
 
@@ -3822,9 +4228,21 @@ def move_picker_selection(direction):
         target_index = item_rows[0] if direction > 0 else item_rows[-1]
     else:
         current_position = item_rows.index(picker_selected_row_index)
-        next_position = max(0, min(len(item_rows) - 1, current_position + direction))
+        next_position = (current_position + direction) % len(item_rows)
         target_index = item_rows[next_position]
 
+    select_picker_row(target_index, paste=True)
+
+
+def move_picker_selection_to_edge(direction):
+    if picker_window is None or picker_window.state() == "withdrawn":
+        return
+
+    item_rows = get_picker_item_row_indices()
+    if not item_rows:
+        return
+
+    target_index = item_rows[0] if direction < 0 else item_rows[-1]
     select_picker_row(target_index, paste=True)
 
 
@@ -3997,18 +4415,25 @@ def hide_picker():
 def show_picker(toggle=True):
     global picker_target_hwnd, picker_hwnd
 
-    foreground_hwnd = ctypes.windll.user32.GetForegroundWindow()
-    if foreground_hwnd and not is_own_overlay_hwnd(foreground_hwnd) and is_game_window(foreground_hwnd):
-        picker_target_hwnd = foreground_hwnd
-    elif last_alert_context_hwnd and is_game_window(last_alert_context_hwnd):
-        picker_target_hwnd = last_alert_context_hwnd
     create_picker_window()
 
     if picker_window.state() != "withdrawn":
         if not toggle:
-            position_picker_window()
+            clear_dead_picker_targets()
+            if picker_target_hwnd and is_live_game_window(picker_target_hwnd):
+                position_picker_window()
+            else:
+                hide_picker()
             return
         hide_picker()
+        return
+
+    clear_dead_picker_targets()
+    foreground_hwnd = ctypes.windll.user32.GetForegroundWindow()
+    if foreground_hwnd and not is_own_overlay_hwnd(foreground_hwnd) and is_game_window(foreground_hwnd):
+        picker_target_hwnd = foreground_hwnd
+    else:
+        picker_target_hwnd = None
         return
 
     reset_market_action_stage()
@@ -4111,10 +4536,39 @@ def is_virtual_key_down(vk):
 def right_shift_worker():
     global right_arrow_hold_active, right_arrow_hold_compensated, right_arrow_press_at
     global right_arrow_was_down, right_ctrl_was_down
+    global up_arrow_was_down, up_arrow_press_at, up_arrow_hold_triggered
+    global down_arrow_was_down, down_arrow_press_at, down_arrow_hold_triggered
 
     while True:
         try:
             picker_visible = picker_actions_enabled and is_picker_window_visible_fast()
+
+            up_down = is_virtual_key_down(VK_UP)
+            if picker_visible and up_down and not up_arrow_was_down:
+                up_arrow_was_down = True
+                up_arrow_press_at = time.monotonic()
+                up_arrow_hold_triggered = False
+            if picker_visible and up_down and up_arrow_was_down and not up_arrow_hold_triggered:
+                if time.monotonic() - up_arrow_press_at >= PICKER_ARROW_EDGE_HOLD_SECONDS:
+                    up_arrow_hold_triggered = True
+                    root.after(0, lambda: move_picker_selection_to_edge(-1))
+            if not picker_visible or not up_down:
+                up_arrow_was_down = False
+                up_arrow_hold_triggered = False
+
+            down_down = is_virtual_key_down(VK_DOWN)
+            if picker_visible and down_down and not down_arrow_was_down:
+                down_arrow_was_down = True
+                down_arrow_press_at = time.monotonic()
+                down_arrow_hold_triggered = False
+            if picker_visible and down_down and down_arrow_was_down and not down_arrow_hold_triggered:
+                if time.monotonic() - down_arrow_press_at >= PICKER_ARROW_EDGE_HOLD_SECONDS:
+                    down_arrow_hold_triggered = True
+                    root.after(0, lambda: move_picker_selection_to_edge(1))
+            if not picker_visible or not down_down:
+                down_arrow_was_down = False
+                down_arrow_hold_triggered = False
+
             right_down = is_virtual_key_down(VK_RIGHT)
 
             if picker_visible and right_down and not right_arrow_was_down:
@@ -4161,6 +4615,8 @@ def right_shift_worker():
 
 
 def check_hotkeys():
+    close_picker_if_target_gone()
+
     while not hotkey_q.empty():
         event = hotkey_q.get()
         if event == "picker":
@@ -4195,8 +4651,39 @@ def check_hotkeys():
     root.after(50, check_hotkeys)
 
 
+def keep_picker_on_top():
+    if picker_window is None or picker_window.state() == "withdrawn":
+        return
+    if not picker_target_hwnd or not is_live_game_window(picker_target_hwnd):
+        return
+
+    foreground_hwnd = get_foreground_hwnd()
+    if not foreground_hwnd or not is_game_window(foreground_hwnd):
+        return
+
+    try:
+        position_picker_window()
+        picker_window.attributes("-topmost", True)
+        picker_window.update_idletasks()
+        hwnd = get_window_hwnd(picker_window)
+        ctypes.windll.user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+        ctypes.windll.user32.SetWindowPos(
+            hwnd,
+            -1,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+    except Exception:
+        pass
+
+
 def keep_on_top():
     try:
+        keep_picker_on_top()
+
         if primary_monitor_alert is not None and primary_monitor_alert.state() != "withdrawn":
             primary_hwnd = get_window_hwnd(primary_monitor_alert)
             ctypes.windll.user32.SetWindowPos(
@@ -4697,6 +5184,7 @@ def draw_notch():
     )
 
 
+acquire_single_instance()
 hide_console()
 
 try:
