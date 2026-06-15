@@ -129,6 +129,27 @@ GAME_MARKET_TAB_Y_RATIO = 0.033
 GAME_DETAILS_TAB_X_RATIO = 0.421
 GAME_DETAILS_TAB_Y_RATIO = 0.088
 GAME_SECTION_CLICK_DELAY_SECONDS = 0.045
+SALVAGE_STORAGE_TAB_X_RATIO = 0.424
+SALVAGE_STORAGE_TAB_Y_RATIO = 0.035
+SALVAGE_DECOR_CATEGORY_X_RATIO = 0.346
+SALVAGE_DECOR_CATEGORY_Y_RATIO = 0.181
+SALVAGE_SORT_DROPDOWN_X_RATIO = 0.887
+SALVAGE_SORT_DROPDOWN_Y_RATIO = 0.181
+SALVAGE_SORT_NEW_OPTION_X_RATIO = 0.888
+SALVAGE_SORT_NEW_OPTION_Y_RATIO = 0.466
+SALVAGE_FIRST_ITEM_X_RATIO = 0.074
+SALVAGE_FIRST_ITEM_Y_RATIO = 0.240
+SALVAGE_ITEM_ROW_STEP_RATIO = 0.233
+SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO = 0.096
+SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO = 0.573
+SALVAGE_ALL_BUTTON_X_RATIO = 0.503
+SALVAGE_ALL_BUTTON_Y_RATIO = 0.471
+SALVAGE_CONFIRM_BUTTON_X_RATIO = 0.500
+SALVAGE_CONFIRM_BUTTON_Y_RATIO = 0.681
+SALVAGE_CONFIRM_HOLD_SECONDS = 1.0
+SALVAGE_CONFIRM_WAIT_SECONDS = 0.42
+SALVAGE_AFTER_CONFIRM_SECONDS = 0.35
+SALVAGE_STEP_DELAY_SECONDS = 0.035
 PICKER_OPEN_HOLD_SECONDS = 0.20
 PICKER_END_RELEASE_GRACE_SECONDS = 0.05
 RIGHT_ARROW_HOLD_SECONDS = 0.09
@@ -310,6 +331,27 @@ DEFAULT_SETTINGS = {
         "details_tab_x_ratio": GAME_DETAILS_TAB_X_RATIO,
         "details_tab_y_ratio": GAME_DETAILS_TAB_Y_RATIO,
         "section_click_delay_seconds": GAME_SECTION_CLICK_DELAY_SECONDS,
+        "salvage_storage_tab_x_ratio": SALVAGE_STORAGE_TAB_X_RATIO,
+        "salvage_storage_tab_y_ratio": SALVAGE_STORAGE_TAB_Y_RATIO,
+        "salvage_decor_category_x_ratio": SALVAGE_DECOR_CATEGORY_X_RATIO,
+        "salvage_decor_category_y_ratio": SALVAGE_DECOR_CATEGORY_Y_RATIO,
+        "salvage_sort_dropdown_x_ratio": SALVAGE_SORT_DROPDOWN_X_RATIO,
+        "salvage_sort_dropdown_y_ratio": SALVAGE_SORT_DROPDOWN_Y_RATIO,
+        "salvage_sort_new_option_x_ratio": SALVAGE_SORT_NEW_OPTION_X_RATIO,
+        "salvage_sort_new_option_y_ratio": SALVAGE_SORT_NEW_OPTION_Y_RATIO,
+        "salvage_first_item_x_ratio": SALVAGE_FIRST_ITEM_X_RATIO,
+        "salvage_first_item_y_ratio": SALVAGE_FIRST_ITEM_Y_RATIO,
+        "salvage_item_row_step_ratio": SALVAGE_ITEM_ROW_STEP_RATIO,
+        "salvage_context_disassemble_x_ratio": SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO,
+        "salvage_context_disassemble_y_ratio": SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO,
+        "salvage_all_button_x_ratio": SALVAGE_ALL_BUTTON_X_RATIO,
+        "salvage_all_button_y_ratio": SALVAGE_ALL_BUTTON_Y_RATIO,
+        "salvage_confirm_button_x_ratio": SALVAGE_CONFIRM_BUTTON_X_RATIO,
+        "salvage_confirm_button_y_ratio": SALVAGE_CONFIRM_BUTTON_Y_RATIO,
+        "salvage_confirm_hold_seconds": SALVAGE_CONFIRM_HOLD_SECONDS,
+        "salvage_confirm_wait_seconds": SALVAGE_CONFIRM_WAIT_SECONDS,
+        "salvage_after_confirm_seconds": SALVAGE_AFTER_CONFIRM_SECONDS,
+        "salvage_step_delay_seconds": SALVAGE_STEP_DELAY_SECONDS,
         "picker_open_hold_seconds": PICKER_OPEN_HOLD_SECONDS,
         "picker_end_release_grace_seconds": PICKER_END_RELEASE_GRACE_SECONDS,
         "right_arrow_hold_seconds": RIGHT_ARROW_HOLD_SECONDS,
@@ -354,6 +396,16 @@ def apply_settings():
     global GAME_MARKET_TAB_X_RATIO, GAME_MARKET_TAB_Y_RATIO
     global GAME_DETAILS_TAB_X_RATIO, GAME_DETAILS_TAB_Y_RATIO
     global GAME_SECTION_CLICK_DELAY_SECONDS, PICKER_OPEN_HOLD_SECONDS
+    global SALVAGE_STORAGE_TAB_X_RATIO, SALVAGE_STORAGE_TAB_Y_RATIO
+    global SALVAGE_DECOR_CATEGORY_X_RATIO, SALVAGE_DECOR_CATEGORY_Y_RATIO
+    global SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO
+    global SALVAGE_SORT_NEW_OPTION_X_RATIO, SALVAGE_SORT_NEW_OPTION_Y_RATIO
+    global SALVAGE_FIRST_ITEM_X_RATIO, SALVAGE_FIRST_ITEM_Y_RATIO, SALVAGE_ITEM_ROW_STEP_RATIO
+    global SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO, SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO
+    global SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO
+    global SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO
+    global SALVAGE_CONFIRM_HOLD_SECONDS, SALVAGE_CONFIRM_WAIT_SECONDS
+    global SALVAGE_AFTER_CONFIRM_SECONDS, SALVAGE_STEP_DELAY_SECONDS
     global PICKER_END_RELEASE_GRACE_SECONDS, RIGHT_ARROW_HOLD_SECONDS
     global MARKET_ACTION_STAGE_MAX_AGE_SECONDS
     global RIGHT_SHIFT_POLL_SECONDS
@@ -488,6 +540,69 @@ def apply_settings():
     GAME_SECTION_CLICK_DELAY_SECONDS = float(
         setting(settings, "game_actions.section_click_delay_seconds", GAME_SECTION_CLICK_DELAY_SECONDS)
     )
+    SALVAGE_STORAGE_TAB_X_RATIO = float(
+        setting(settings, "game_actions.salvage_storage_tab_x_ratio", SALVAGE_STORAGE_TAB_X_RATIO)
+    )
+    SALVAGE_STORAGE_TAB_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_storage_tab_y_ratio", SALVAGE_STORAGE_TAB_Y_RATIO)
+    )
+    SALVAGE_DECOR_CATEGORY_X_RATIO = float(
+        setting(settings, "game_actions.salvage_decor_category_x_ratio", SALVAGE_DECOR_CATEGORY_X_RATIO)
+    )
+    SALVAGE_DECOR_CATEGORY_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_decor_category_y_ratio", SALVAGE_DECOR_CATEGORY_Y_RATIO)
+    )
+    SALVAGE_SORT_DROPDOWN_X_RATIO = float(
+        setting(settings, "game_actions.salvage_sort_dropdown_x_ratio", SALVAGE_SORT_DROPDOWN_X_RATIO)
+    )
+    SALVAGE_SORT_DROPDOWN_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_sort_dropdown_y_ratio", SALVAGE_SORT_DROPDOWN_Y_RATIO)
+    )
+    SALVAGE_SORT_NEW_OPTION_X_RATIO = float(
+        setting(settings, "game_actions.salvage_sort_new_option_x_ratio", SALVAGE_SORT_NEW_OPTION_X_RATIO)
+    )
+    SALVAGE_SORT_NEW_OPTION_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_sort_new_option_y_ratio", SALVAGE_SORT_NEW_OPTION_Y_RATIO)
+    )
+    SALVAGE_FIRST_ITEM_X_RATIO = float(
+        setting(settings, "game_actions.salvage_first_item_x_ratio", SALVAGE_FIRST_ITEM_X_RATIO)
+    )
+    SALVAGE_FIRST_ITEM_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_first_item_y_ratio", SALVAGE_FIRST_ITEM_Y_RATIO)
+    )
+    SALVAGE_ITEM_ROW_STEP_RATIO = float(
+        setting(settings, "game_actions.salvage_item_row_step_ratio", SALVAGE_ITEM_ROW_STEP_RATIO)
+    )
+    SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO = float(
+        setting(settings, "game_actions.salvage_context_disassemble_x_ratio", SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO)
+    )
+    SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_context_disassemble_y_ratio", SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO)
+    )
+    SALVAGE_ALL_BUTTON_X_RATIO = float(
+        setting(settings, "game_actions.salvage_all_button_x_ratio", SALVAGE_ALL_BUTTON_X_RATIO)
+    )
+    SALVAGE_ALL_BUTTON_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_all_button_y_ratio", SALVAGE_ALL_BUTTON_Y_RATIO)
+    )
+    SALVAGE_CONFIRM_BUTTON_X_RATIO = float(
+        setting(settings, "game_actions.salvage_confirm_button_x_ratio", SALVAGE_CONFIRM_BUTTON_X_RATIO)
+    )
+    SALVAGE_CONFIRM_BUTTON_Y_RATIO = float(
+        setting(settings, "game_actions.salvage_confirm_button_y_ratio", SALVAGE_CONFIRM_BUTTON_Y_RATIO)
+    )
+    SALVAGE_CONFIRM_HOLD_SECONDS = float(
+        setting(settings, "game_actions.salvage_confirm_hold_seconds", SALVAGE_CONFIRM_HOLD_SECONDS)
+    )
+    SALVAGE_CONFIRM_WAIT_SECONDS = float(
+        setting(settings, "game_actions.salvage_confirm_wait_seconds", SALVAGE_CONFIRM_WAIT_SECONDS)
+    )
+    SALVAGE_AFTER_CONFIRM_SECONDS = float(
+        setting(settings, "game_actions.salvage_after_confirm_seconds", SALVAGE_AFTER_CONFIRM_SECONDS)
+    )
+    SALVAGE_STEP_DELAY_SECONDS = float(
+        setting(settings, "game_actions.salvage_step_delay_seconds", SALVAGE_STEP_DELAY_SECONDS)
+    )
     PICKER_OPEN_HOLD_SECONDS = float(
         setting(settings, "game_actions.picker_open_hold_seconds", PICKER_OPEN_HOLD_SECONDS)
     )
@@ -550,6 +665,8 @@ KEYEVENTF_UNICODE = 0x0004
 KEYEVENTF_SCANCODE = 0x0008
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
 MAPVK_VK_TO_VSC = 0
 VK_CONTROL = 0x11
 VK_A = 0x41
@@ -559,12 +676,14 @@ VK_RETURN = 0x0D
 VK_ESCAPE = 0x1B
 VK_NEXT = 0x22
 VK_END = 0x23
+VK_DELETE = 0x2E
 VK_LEFT = 0x25
 VK_UP = 0x26
 VK_RIGHT = 0x27
 VK_DOWN = 0x28
 VK_RCONTROL = 0xA3
 VK_RSHIFT = 0xA1
+SALVAGE_HOTKEY_ID = 7317
 PICKER_UP_HOTKEY_ID = 7312
 PICKER_DOWN_HOTKEY_ID = 7313
 PICKER_RIGHT_HOTKEY_ID = 7314
@@ -693,6 +812,9 @@ picker_end_press_was_open = False
 picker_end_hold_triggered = False
 picker_end_latched = False
 picker_end_press_at = 0
+picker_end_ignore_until = 0
+salvage_running = False
+salvage_stop_event = threading.Event()
 market_action_stage = "open_card"
 market_action_stage_ready_at = 0
 market_action_stage_updated_at = 0
@@ -2264,6 +2386,28 @@ def send_mouse_click():
     return down_ok and up_ok
 
 
+def send_mouse_right_click():
+    down_ok = send_mouse_button(MOUSEEVENTF_RIGHTDOWN)
+    time.sleep(MOUSE_CLICK_DELAY)
+    up_ok = send_mouse_button(MOUSEEVENTF_RIGHTUP)
+    return down_ok and up_ok
+
+
+def hold_left_mouse(seconds, stop_event=None):
+    if not send_mouse_button(MOUSEEVENTF_LEFTDOWN):
+        return False
+
+    try:
+        end_at = time.monotonic() + max(0, seconds)
+        while time.monotonic() < end_at:
+            if stop_event is not None and stop_event.is_set():
+                return False
+            time.sleep(0.01)
+        return True
+    finally:
+        send_mouse_button(MOUSEEVENTF_LEFTUP)
+
+
 def tap_key(vk, delay=0.004):
     # Очень быстрое нажатие клавиши через keybd_event.
     ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
@@ -2470,6 +2614,18 @@ def click_game_ratio(x_ratio, y_ratio):
     return send_mouse_click()
 
 
+def right_click_game_ratio(x_ratio, y_ratio):
+    if not move_cursor_to_game_ratio(x_ratio, y_ratio):
+        return False
+    return send_mouse_right_click()
+
+
+def hold_game_ratio(x_ratio, y_ratio, seconds, stop_event=None):
+    if not move_cursor_to_game_ratio(x_ratio, y_ratio):
+        return False
+    return hold_left_mouse(seconds, stop_event=stop_event)
+
+
 def open_selected_market_card():
     return click_game_ratio(GAME_OPEN_CARD_X_RATIO, GAME_OPEN_CARD_Y_RATIO)
 
@@ -2539,23 +2695,24 @@ def handle_market_action_right():
     global right_arrow_last_action_stage
 
     detected_stage = detect_market_action_stage()
-    stage = detected_stage or get_market_action_stage()
     now = time.monotonic()
-    right_arrow_last_action_stage = stage
 
-    if stage == "quantity":
+    if detected_stage == "quantity":
+        right_arrow_last_action_stage = "quantity"
         set_market_action_stage("quantity", 0)
         return increase_market_item_quantity()
 
-    if stage == "buy":
+    if detected_stage == "buy":
+        right_arrow_last_action_stage = "buy"
         ok = buy_current_market_item()
         if ok:
             set_market_action_stage("opening_buy_dialog", now + GAME_BUY_TO_QUANTITY_DELAY_SECONDS)
         return ok
 
-    if stage == "opening_buy_dialog":
+    if get_market_action_stage() == "opening_buy_dialog":
         return False
 
+    right_arrow_last_action_stage = "open_card"
     ok = open_selected_market_card()
     if ok and market_action_stage != "opening_card":
         set_market_action_stage("opening_card", now + GAME_OPEN_TO_BUY_DELAY_SECONDS)
@@ -2594,6 +2751,9 @@ def handle_picker_end_hotkey():
     global picker_end_press_active, picker_end_press_was_open, picker_end_hold_triggered
     global picker_end_latched, picker_end_press_at
 
+    if time.monotonic() < picker_end_ignore_until:
+        return
+
     if picker_end_latched or picker_end_press_active:
         return
 
@@ -2611,6 +2771,7 @@ def handle_picker_end_hotkey():
 
 def finish_picker_end_press():
     global picker_end_press_active, picker_end_hold_pending, picker_end_latched
+    global picker_end_ignore_until
 
     if not picker_end_press_active:
         picker_end_latched = False
@@ -2621,6 +2782,7 @@ def finish_picker_end_press():
     picker_end_latched = False
 
     if picker_end_hold_triggered:
+        picker_end_ignore_until = time.monotonic() + 0.35
         return
 
     if picker_end_press_was_open:
@@ -2630,9 +2792,102 @@ def finish_picker_end_press():
 
 
 def handle_right_ctrl_escape():
-    if detect_market_action_stage() != "quantity" and get_market_action_stage() != "quantity":
+    if detect_market_action_stage() != "quantity":
         return False
     return decrease_market_item_quantity()
+
+
+def sleep_with_stop(seconds, stop_event):
+    end_at = time.monotonic() + max(0, seconds)
+    while time.monotonic() < end_at:
+        if stop_event.is_set():
+            return False
+        time.sleep(min(0.02, max(0, end_at - time.monotonic())))
+    return not stop_event.is_set()
+
+
+def salvage_click(x_ratio, y_ratio, stop_event, right=False):
+    if stop_event.is_set() or not get_picker_action_hwnd():
+        return False
+    ok = right_click_game_ratio(x_ratio, y_ratio) if right else click_game_ratio(x_ratio, y_ratio)
+    if ok:
+        sleep_with_stop(SALVAGE_STEP_DELAY_SECONDS, stop_event)
+    return ok
+
+
+def salvage_confirm_available():
+    return is_game_button_visible(SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO)
+
+
+def run_salvage_loop(stop_event):
+    global salvage_running
+
+    try:
+        hwnd = get_picker_action_hwnd()
+        if not hwnd:
+            return
+
+        root.after(0, hide_picker)
+        sleep_with_stop(0.06, stop_event)
+
+        if not salvage_click(SALVAGE_STORAGE_TAB_X_RATIO, SALVAGE_STORAGE_TAB_Y_RATIO, stop_event):
+            return
+        if not salvage_click(SALVAGE_DECOR_CATEGORY_X_RATIO, SALVAGE_DECOR_CATEGORY_Y_RATIO, stop_event):
+            return
+        if not salvage_click(SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO, stop_event):
+            return
+        if not salvage_click(SALVAGE_SORT_NEW_OPTION_X_RATIO, SALVAGE_SORT_NEW_OPTION_Y_RATIO, stop_event):
+            return
+
+        item_y = SALVAGE_FIRST_ITEM_Y_RATIO
+        while not stop_event.is_set() and get_picker_action_hwnd():
+            if not salvage_click(SALVAGE_FIRST_ITEM_X_RATIO, item_y, stop_event, right=True):
+                break
+            if not salvage_click(
+                SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO,
+                SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO,
+                stop_event,
+            ):
+                break
+
+            if not sleep_with_stop(SALVAGE_CONFIRM_WAIT_SECONDS, stop_event):
+                break
+            if not salvage_confirm_available():
+                append_log_line("salvage stopped: confirm button not found")
+                break
+
+            salvage_click(SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO, stop_event)
+            if not hold_game_ratio(
+                SALVAGE_CONFIRM_BUTTON_X_RATIO,
+                SALVAGE_CONFIRM_BUTTON_Y_RATIO,
+                SALVAGE_CONFIRM_HOLD_SECONDS,
+                stop_event=stop_event,
+            ):
+                break
+            if not sleep_with_stop(SALVAGE_AFTER_CONFIRM_SECONDS, stop_event):
+                break
+    except Exception as e:
+        log_error("salvage", f"Salvage loop failed: {e}")
+    finally:
+        send_mouse_button(MOUSEEVENTF_LEFTUP)
+        salvage_running = False
+        stop_event.clear()
+
+
+def toggle_salvage_loop():
+    global salvage_running
+
+    if salvage_running:
+        salvage_stop_event.set()
+        send_mouse_button(MOUSEEVENTF_LEFTUP)
+        return
+
+    if not is_picker_open() or not get_picker_action_hwnd():
+        return
+
+    salvage_stop_event.clear()
+    salvage_running = True
+    threading.Thread(target=run_salvage_loop, args=(salvage_stop_event,), daemon=True).start()
 
 
 def set_order_button_hold(is_down):
@@ -2642,7 +2897,7 @@ def set_order_button_hold(is_down):
         return True
 
     if is_down:
-        if detect_market_action_stage() != "quantity" and get_market_action_stage() != "quantity":
+        if detect_market_action_stage() != "quantity":
             return False
         if not move_cursor_to_game_ratio(GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO):
             return False
@@ -3642,15 +3897,18 @@ def create_picker_window():
     )
     picker_timer_label.place(relx=0.5, rely=0.5, anchor="center")
 
-    picker_status_label = tk.Label(
-        timer_frame,
-        text="",
-        fg=PICKER_STATUS_FG,
-        bg="#111417",
-        anchor="e",
-        font=("Segoe UI", 7, "bold"),
-    )
-    picker_status_label.place(relx=1.0, x=-10, rely=0.5, anchor="e")
+    if PICKER_SHOW_STATUS:
+        picker_status_label = tk.Label(
+            timer_frame,
+            text="",
+            fg=PICKER_STATUS_FG,
+            bg="#111417",
+            anchor="e",
+            font=("Segoe UI", 7, "bold"),
+        )
+        picker_status_label.place(relx=1.0, x=-10, rely=0.5, anchor="e")
+    else:
+        picker_status_label = None
 
     list_frame = tk.Frame(body, bg="#0b0f14")
     list_frame.pack(side="top", fill="both", expand=True)
@@ -3818,6 +4076,13 @@ def hotkey_worker():
             VK_END,
         ):
             log_error("hotkey", "RegisterHotKey failed for End")
+        if not ctypes.windll.user32.RegisterHotKey(
+            None,
+            SALVAGE_HOTKEY_ID,
+            0,
+            VK_DELETE,
+        ):
+            log_error("hotkey", "RegisterHotKey failed for Delete")
 
         msg = MSG()
         while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
@@ -3828,6 +4093,8 @@ def hotkey_worker():
                     hotkey_q.put("picker")
                 elif msg.wParam == PICKER_OPEN_END_HOTKEY_ID:
                     hotkey_q.put("picker_end_open")
+                elif msg.wParam == SALVAGE_HOTKEY_ID:
+                    hotkey_q.put("salvage_toggle")
                 else:
                     for hotkey_id, _vk, event_name in PICKER_ACTION_HOTKEYS:
                         if msg.wParam == hotkey_id:
@@ -3859,7 +4126,7 @@ def right_shift_worker():
             if picker_visible and right_down and right_arrow_was_down and not right_arrow_hold_active:
                 held_for = time.monotonic() - right_arrow_press_at
                 if held_for >= RIGHT_ARROW_HOLD_SECONDS and get_picker_action_hwnd():
-                    stage = detect_market_action_stage() or get_market_action_stage()
+                    stage = detect_market_action_stage()
                     if stage == "quantity":
                         if right_arrow_last_action_stage == "quantity" and not right_arrow_hold_compensated:
                             decrease_market_item_quantity()
@@ -3900,6 +4167,8 @@ def check_hotkeys():
             show_picker()
         elif event == "picker_end_open":
             handle_picker_end_hotkey()
+        elif event == "salvage_toggle":
+            toggle_salvage_loop()
         elif event == "picker_up":
             if should_enable_picker_navigation_hotkeys():
                 move_picker_selection(-1)
