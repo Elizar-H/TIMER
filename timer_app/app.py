@@ -2,17 +2,6 @@ import ctypes
 from ctypes import wintypes
 import json
 
-
-def enable_dpi_awareness():
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
-
-
 import threading
 import queue
 import math
@@ -30,6 +19,66 @@ from timer_app.paths import SETTINGS_PATH
 from timer_app.picker.cache import (
     load_picker_cache as load_picker_cache_file,
     save_picker_cache as save_picker_cache_file,
+)
+from timer_app.winapi import (
+    MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP,
+    MSG,
+    POINT,
+    SWP_NOACTIVATE,
+    SWP_NOMOVE,
+    SWP_NOSIZE,
+    SWP_SHOWWINDOW,
+    SW_SHOWNOACTIVATE,
+    VK_A,
+    VK_BACK,
+    VK_DELETE,
+    VK_DOWN,
+    VK_END,
+    VK_ESCAPE,
+    VK_LEFT,
+    VK_RCONTROL,
+    VK_RETURN,
+    VK_RIGHT,
+    VK_UP,
+    VK_V,
+    WM_APP_HOTKEY_COMMAND,
+    WM_HOTKEY,
+    enable_dpi_awareness,
+    get_cursor_pos,
+    get_screen_pixel_rgb,
+    hide_console,
+    is_virtual_key_down,
+    send_ctrl_key,
+    send_mouse_button,
+    send_mouse_click,
+    send_mouse_right_click,
+    tap_key,
+    tap_key_scancode,
+)
+from timer_app.windows import (
+    apply_no_activate,
+    apply_no_focus_clickthrough,
+    find_game_window,
+    force_foreground_window,
+    geometry_from_rect,
+    get_foreground_hwnd,
+    get_hwnd_pixel_rgb,
+    get_hwnd_ratio_point,
+    get_hwnd_rect,
+    get_primary_monitor_rect,
+    get_second_monitor_rect,
+    get_window_hwnd,
+    get_window_info,
+    get_window_process_path,
+    is_game_foreground,
+    is_game_window,
+    is_live_game_window,
+    is_live_window,
+    is_window_on_primary_monitor,
+    restore_game_window,
+    show_tk_window_no_activate,
+    show_tk_window_on_rect_no_activate,
 )
 
 FLASH_URL = "https://crossoutcore.ru/flash-crashes/"
@@ -683,49 +732,6 @@ def apply_settings():
 
 apply_settings()
 
-# Windows constants
-GWL_EXSTYLE = -20
-WS_EX_TRANSPARENT = 0x00000020
-WS_EX_TOOLWINDOW = 0x00000080
-WS_EX_LAYERED = 0x00080000
-WS_EX_NOACTIVATE = 0x08000000
-WS_EX_APPWINDOW = 0x00040000
-SWP_NOMOVE = 0x0002
-SWP_NOSIZE = 0x0001
-SWP_NOZORDER = 0x0004
-SWP_NOACTIVATE = 0x0010
-SWP_SHOWWINDOW = 0x0040
-SWP_FRAMECHANGED = 0x0020
-SW_SHOWNOACTIVATE = 4
-SW_SHOW = 5
-SW_RESTORE = 9
-MONITORINFOF_PRIMARY = 1
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-INPUT_MOUSE = 0
-INPUT_KEYBOARD = 1
-KEYEVENTF_KEYUP = 0x0002
-KEYEVENTF_UNICODE = 0x0004
-KEYEVENTF_SCANCODE = 0x0008
-MOUSEEVENTF_LEFTDOWN = 0x0002
-MOUSEEVENTF_LEFTUP = 0x0004
-MOUSEEVENTF_RIGHTDOWN = 0x0008
-MOUSEEVENTF_RIGHTUP = 0x0010
-MAPVK_VK_TO_VSC = 0
-VK_CONTROL = 0x11
-VK_A = 0x41
-VK_V = 0x56
-VK_BACK = 0x08
-VK_RETURN = 0x0D
-VK_ESCAPE = 0x1B
-VK_NEXT = 0x22
-VK_END = 0x23
-VK_DELETE = 0x2E
-VK_LEFT = 0x25
-VK_UP = 0x26
-VK_RIGHT = 0x27
-VK_DOWN = 0x28
-VK_RCONTROL = 0xA3
-VK_RSHIFT = 0xA1
 SALVAGE_HOTKEY_ID = 7317
 PICKER_UP_HOTKEY_ID = 7312
 PICKER_DOWN_HOTKEY_ID = 7313
@@ -737,59 +743,6 @@ PICKER_ACTION_HOTKEYS = (
     (PICKER_RIGHT_HOTKEY_ID, VK_RIGHT, "picker_right"),
     (PICKER_LEFT_HOTKEY_ID, VK_LEFT, "picker_left"),
 )
-
-
-class MONITORINFO(ctypes.Structure):
-    _fields_ = [
-        ("cbSize", wintypes.DWORD),
-        ("rcMonitor", wintypes.RECT),
-        ("rcWork", wintypes.RECT),
-        ("dwFlags", wintypes.DWORD),
-    ]
-
-
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [
-        ("wVk", wintypes.WORD),
-        ("wScan", wintypes.WORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [
-        ("dx", wintypes.LONG),
-        ("dy", wintypes.LONG),
-        ("mouseData", wintypes.DWORD),
-        ("dwFlags", wintypes.DWORD),
-        ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-
-class INPUTUNION(ctypes.Union):
-    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
-
-
-class INPUT(ctypes.Structure):
-    _fields_ = [("type", wintypes.DWORD), ("union", INPUTUNION)]
-
-
-class POINT(ctypes.Structure):
-    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
-
-
-class MSG(ctypes.Structure):
-    _fields_ = [
-        ("hwnd", wintypes.HWND),
-        ("message", wintypes.UINT),
-        ("wParam", wintypes.WPARAM),
-        ("lParam", wintypes.LPARAM),
-        ("time", wintypes.DWORD),
-        ("pt", POINT),
-    ]
 
 q = queue.Queue()
 hotkey_q = queue.Queue()
@@ -879,6 +832,22 @@ notch_width = BASE_NOTCH_WIDTH
 notch_height = BASE_NOTCH_HEIGHT
 notch_radius = BASE_NOTCH_RADIUS
 font_pixels = BASE_FONT_PIXELS
+
+TODO_EXTRACT_LATER = (
+    "clear_dead_picker_targets",
+    "close_picker_if_target_gone",
+    "is_own_overlay_hwnd",
+    "is_picker_open",
+    "is_picker_window_visible_fast",
+    "get_alert_context_hwnd",
+    "get_or_restore_game_hwnd",
+    "keep_picker_on_top",
+    "keep_on_top",
+    "make_task_manager_app",
+    "show_overlay",
+    "apply_window_region",
+    "configure_dpi_sizes",
+)
 
 
 def acquire_single_instance():
@@ -1243,15 +1212,6 @@ def parse_timer(value):
     minutes = int(match.group(1))
     seconds = int(match.group(2))
     return match.group(0), minutes * 60 + seconds
-
-
-def hide_console():
-    try:
-        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-        if hwnd:
-            ctypes.windll.user32.ShowWindow(hwnd, 0)
-    except Exception:
-        pass
 
 
 def is_alert_window(seconds):
@@ -1980,7 +1940,7 @@ def update_colors():
         set_second_monitor_alert(False)
         return
 
-    primary_active = is_window_on_primary_monitor(foreground_hwnd)
+    primary_active = is_window_on_primary_monitor(foreground_hwnd, primary_monitor_rect)
 
     if game_foreground:
         set_notch_visible(False)
@@ -2114,27 +2074,6 @@ def set_second_monitor_border_color(color):
         second_monitor_canvas.itemconfig(item, fill=color)
 
 
-def get_foreground_hwnd():
-    try:
-        return ctypes.windll.user32.GetForegroundWindow()
-    except Exception:
-        return 0
-
-
-def is_live_window(hwnd):
-    if not hwnd:
-        return False
-
-    try:
-        return bool(ctypes.windll.user32.IsWindow(hwnd))
-    except Exception:
-        return False
-
-
-def is_live_game_window(hwnd):
-    return is_live_window(hwnd) and is_game_window(hwnd)
-
-
 def clear_dead_picker_targets():
     global picker_target_hwnd, last_alert_context_hwnd
 
@@ -2221,140 +2160,6 @@ def get_alert_context_hwnd():
     return foreground_hwnd
 
 
-def get_window_info(hwnd):
-    try:
-        if not hwnd:
-            return ""
-
-        title_length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
-        title_buffer = ctypes.create_unicode_buffer(title_length + 1)
-        ctypes.windll.user32.GetWindowTextW(hwnd, title_buffer, title_length + 1)
-
-        pid = wintypes.DWORD()
-        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        process_path = ""
-
-        if pid.value:
-            process = ctypes.windll.kernel32.OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION,
-                False,
-                pid.value,
-            )
-            if process:
-                try:
-                    path_size = wintypes.DWORD(32768)
-                    path_buffer = ctypes.create_unicode_buffer(path_size.value)
-                    if ctypes.windll.kernel32.QueryFullProcessImageNameW(
-                        process,
-                        0,
-                        path_buffer,
-                        ctypes.byref(path_size),
-                    ):
-                        process_path = path_buffer.value
-                finally:
-                    ctypes.windll.kernel32.CloseHandle(process)
-
-        return f"{title_buffer.value} {process_path}".lower()
-    except Exception:
-        return ""
-
-
-def get_window_process_path(hwnd):
-    try:
-        if not hwnd:
-            return ""
-
-        pid = wintypes.DWORD()
-        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-
-        if not pid.value:
-            return ""
-
-        process = ctypes.windll.kernel32.OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION,
-            False,
-            pid.value,
-        )
-        if not process:
-            return ""
-
-        try:
-            path_size = wintypes.DWORD(32768)
-            path_buffer = ctypes.create_unicode_buffer(path_size.value)
-            if ctypes.windll.kernel32.QueryFullProcessImageNameW(
-                process,
-                0,
-                path_buffer,
-                ctypes.byref(path_size),
-            ):
-                return path_buffer.value.lower()
-        finally:
-            ctypes.windll.kernel32.CloseHandle(process)
-
-    except Exception:
-        return ""
-
-    return ""
-
-
-def get_foreground_window_info():
-    return get_window_info(get_foreground_hwnd())
-
-
-def is_game_window(hwnd):
-    process_path = get_window_process_path(hwnd)
-    if not process_path:
-        return False
-
-    process_name = Path(process_path).name.lower()
-    process_info = f"{process_name} {process_path}"
-    return any(keyword in process_info for keyword in GAME_WINDOW_KEYWORDS)
-
-
-def is_game_foreground():
-    return is_game_window(get_foreground_hwnd())
-
-
-def find_game_window():
-    found_hwnds = []
-
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    def enum_proc(hwnd, _lparam):
-        if hwnd and is_game_window(hwnd):
-            found_hwnds.append(hwnd)
-            return False
-        return True
-
-    try:
-        ctypes.windll.user32.EnumWindows(enum_proc, 0)
-    except Exception as e:
-        log_error("game_window", f"EnumWindows failed: {e}")
-
-    return found_hwnds[0] if found_hwnds else 0
-
-
-def restore_game_window(hwnd):
-    if not hwnd:
-        return False
-
-    user32 = ctypes.windll.user32
-    try:
-        if user32.IsIconic(hwnd):
-            user32.ShowWindow(hwnd, SW_RESTORE)
-            time.sleep(0.10)
-        else:
-            user32.ShowWindow(hwnd, SW_SHOW)
-
-        if force_foreground_window(hwnd):
-            return True
-
-        time.sleep(0.06)
-        return bool(force_foreground_window(hwnd) or is_game_window(get_foreground_hwnd()))
-    except Exception as e:
-        log_error("game_window", f"Restore failed: {e}")
-        return False
-
-
 def get_or_restore_game_hwnd():
     global picker_target_hwnd, last_alert_context_hwnd
 
@@ -2380,143 +2185,6 @@ def get_or_restore_game_hwnd():
             return hwnd
 
     return 0
-
-
-def is_window_on_primary_monitor(hwnd):
-    try:
-        window_rect = get_hwnd_rect(hwnd)
-        monitor_rect = primary_monitor_rect or get_primary_monitor_rect()
-
-        if window_rect is None or monitor_rect is None:
-            return False
-
-        left, top, right, bottom = window_rect
-        center_x = (left + right) // 2
-        center_y = (top + bottom) // 2
-        monitor_left, monitor_top, monitor_right, monitor_bottom = monitor_rect
-
-        return (
-            monitor_left <= center_x < monitor_right
-            and monitor_top <= center_y < monitor_bottom
-        )
-    except Exception:
-        return False
-
-
-def is_foreground_on_primary_monitor():
-    return is_window_on_primary_monitor(get_foreground_hwnd())
-
-
-def send_key(vk, key_up=False):
-    flags = KEYEVENTF_KEYUP if key_up else 0
-    input_event = INPUT(
-        type=INPUT_KEYBOARD,
-        union=INPUTUNION(
-            ki=KEYBDINPUT(
-                wVk=vk,
-                wScan=0,
-                dwFlags=flags,
-                time=0,
-                dwExtraInfo=None,
-            )
-        ),
-    )
-    ctypes.windll.user32.SendInput(1, ctypes.byref(input_event), ctypes.sizeof(INPUT))
-
-
-def send_key_scancode(vk, key_up=False):
-    scan_code = ctypes.windll.user32.MapVirtualKeyW(vk, MAPVK_VK_TO_VSC)
-    flags = KEYEVENTF_SCANCODE | (KEYEVENTF_KEYUP if key_up else 0)
-    input_event = INPUT(
-        type=INPUT_KEYBOARD,
-        union=INPUTUNION(
-            ki=KEYBDINPUT(
-                wVk=0,
-                wScan=scan_code,
-                dwFlags=flags,
-                time=0,
-                dwExtraInfo=None,
-            )
-        ),
-    )
-    ctypes.windll.user32.SendInput(1, ctypes.byref(input_event), ctypes.sizeof(INPUT))
-
-
-def tap_key_scancode(vk, delay=0.025):
-    send_key_scancode(vk)
-    time.sleep(delay)
-    send_key_scancode(vk, key_up=True)
-
-
-def send_unicode_unit(unit, key_up=False):
-    flags = KEYEVENTF_UNICODE | (KEYEVENTF_KEYUP if key_up else 0)
-    input_event = INPUT(
-        type=INPUT_KEYBOARD,
-        union=INPUTUNION(
-            ki=KEYBDINPUT(
-                wVk=0,
-                wScan=unit,
-                dwFlags=flags,
-                time=0,
-                dwExtraInfo=None,
-            )
-        ),
-    )
-    ctypes.windll.user32.SendInput(1, ctypes.byref(input_event), ctypes.sizeof(INPUT))
-
-
-def send_unicode_text(text):
-    encoded_text = text.encode("utf-16-le", "surrogatepass")
-    for index in range(0, len(encoded_text), 2):
-        unit = int.from_bytes(encoded_text[index : index + 2], "little")
-        send_unicode_unit(unit)
-        send_unicode_unit(unit, key_up=True)
-        time.sleep(0.003)
-
-
-def send_mouse_button(flags):
-    input_event = INPUT(
-        type=INPUT_MOUSE,
-        union=INPUTUNION(
-            mi=MOUSEINPUT(
-                dx=0,
-                dy=0,
-                mouseData=0,
-                dwFlags=flags,
-                time=0,
-                dwExtraInfo=None,
-            )
-        ),
-    )
-    return ctypes.windll.user32.SendInput(
-        1,
-        ctypes.byref(input_event),
-        ctypes.sizeof(INPUT),
-    ) == 1
-
-
-def send_mouse_click():
-    down_ok = send_mouse_button(MOUSEEVENTF_LEFTDOWN)
-    time.sleep(MOUSE_CLICK_DELAY)
-    up_ok = send_mouse_button(MOUSEEVENTF_LEFTUP)
-    return down_ok and up_ok
-
-
-def send_mouse_right_click():
-    down_ok = send_mouse_button(MOUSEEVENTF_RIGHTDOWN)
-    time.sleep(MOUSE_CLICK_DELAY)
-    up_ok = send_mouse_button(MOUSEEVENTF_RIGHTUP)
-    return down_ok and up_ok
-
-
-def get_cursor_pos():
-    point = POINT()
-    try:
-        if ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
-            return point.x, point.y
-    except Exception:
-        pass
-    return None
 
 
 def note_salvage_cursor_pos():
@@ -2563,61 +2231,6 @@ def hold_left_mouse(seconds, stop_event=None, mouse_guard=False):
         send_mouse_button(MOUSEEVENTF_LEFTUP)
 
 
-def tap_key(vk, delay=0.004):
-    # Очень быстрое нажатие клавиши через keybd_event.
-    ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
-    time.sleep(delay)
-    ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-
-
-def send_ctrl_key(vk):
-    # Очень быстрый Ctrl+клавиша.
-    ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
-    time.sleep(PASTE_BETWEEN_KEYS_DELAY)
-    ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
-    time.sleep(PASTE_BETWEEN_KEYS_DELAY)
-    ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-    time.sleep(PASTE_BETWEEN_KEYS_DELAY)
-    ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-
-
-def force_foreground_window(hwnd):
-    if not hwnd:
-        return False
-
-    user32 = ctypes.windll.user32
-    kernel32 = ctypes.windll.kernel32
-    foreground_hwnd = user32.GetForegroundWindow()
-    if foreground_hwnd == hwnd:
-        return True
-
-    current_thread_id = kernel32.GetCurrentThreadId()
-    foreground_thread_id = user32.GetWindowThreadProcessId(foreground_hwnd, None)
-    target_thread_id = user32.GetWindowThreadProcessId(hwnd, None)
-    attached_foreground = False
-    attached_target = False
-
-    try:
-        if foreground_thread_id and foreground_thread_id != current_thread_id:
-            attached_foreground = bool(
-                user32.AttachThreadInput(current_thread_id, foreground_thread_id, True)
-            )
-        if target_thread_id and target_thread_id != current_thread_id:
-            attached_target = bool(
-                user32.AttachThreadInput(current_thread_id, target_thread_id, True)
-            )
-
-        user32.SetForegroundWindow(hwnd)
-        user32.BringWindowToTop(hwnd)
-        user32.SetFocus(hwnd)
-        return user32.GetForegroundWindow() == hwnd
-    finally:
-        if attached_target:
-            user32.AttachThreadInput(current_thread_id, target_thread_id, False)
-        if attached_foreground:
-            user32.AttachThreadInput(current_thread_id, foreground_thread_id, False)
-
-
 def click_game_search_field(hwnd, clicks=1):
     rect = get_hwnd_rect(hwnd)
     if rect is None:
@@ -2636,7 +2249,7 @@ def click_game_search_field(hwnd, clicks=1):
     clicked = False
     for _ in range(max(1, clicks)):
         user32.SetCursorPos(x, y)
-        if not send_mouse_click():
+        if not send_mouse_click(MOUSE_CLICK_DELAY):
             user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
             time.sleep(MOUSE_CLICK_DELAY)
             user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
@@ -2653,50 +2266,6 @@ def get_picker_action_hwnd():
         return foreground_hwnd
 
     return 0
-
-
-def get_hwnd_ratio_point(hwnd, x_ratio, y_ratio):
-    rect = get_hwnd_rect(hwnd)
-    if rect is None:
-        return None
-
-    left, top, right, bottom = rect
-    width = max(1, right - left)
-    height = max(1, bottom - top)
-    return left + round(width * x_ratio), top + round(height * y_ratio)
-
-
-def get_screen_pixel_rgb(x, y):
-    hdc = ctypes.windll.user32.GetDC(0)
-    if not hdc:
-        return None
-
-    try:
-        color = ctypes.windll.gdi32.GetPixel(hdc, int(x), int(y))
-        if color == -1:
-            return None
-        return color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF
-    finally:
-        ctypes.windll.user32.ReleaseDC(0, hdc)
-
-
-def get_hwnd_pixel_rgb(hwnd, x, y):
-    rect = get_hwnd_rect(hwnd)
-    if rect is None:
-        return None
-
-    left, top, _right, _bottom = rect
-    hdc = ctypes.windll.user32.GetDC(hwnd)
-    if not hdc:
-        return None
-
-    try:
-        color = ctypes.windll.gdi32.GetPixel(hdc, int(x - left), int(y - top))
-        if color == -1:
-            return None
-        return color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF
-    finally:
-        ctypes.windll.user32.ReleaseDC(hwnd, hdc)
 
 
 def is_orange_button_pixel(rgb):
@@ -2766,13 +2335,13 @@ def move_cursor_to_game_ratio(x_ratio, y_ratio):
 def click_game_ratio(x_ratio, y_ratio):
     if not move_cursor_to_game_ratio(x_ratio, y_ratio):
         return False
-    return send_mouse_click()
+    return send_mouse_click(MOUSE_CLICK_DELAY)
 
 
 def right_click_game_ratio(x_ratio, y_ratio):
     if not move_cursor_to_game_ratio(x_ratio, y_ratio):
         return False
-    return send_mouse_right_click()
+    return send_mouse_right_click(MOUSE_CLICK_DELAY)
 
 
 def hold_game_ratio(x_ratio, y_ratio, seconds, stop_event=None, mouse_guard=False):
@@ -3002,7 +2571,7 @@ def salvage_right_click_item(x_ratio, y_ratio, stop_event):
         wait_time = SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS - since_last_right_click
         if not sleep_with_stop(wait_time, stop_event, mouse_guard=True):
             return False
-    if not send_mouse_right_click():
+    if not send_mouse_right_click(MOUSE_CLICK_DELAY):
         return False
     salvage_last_item_right_click_at = time.monotonic()
     note_salvage_cursor_pos()
@@ -3253,11 +2822,11 @@ def paste_item_name(name):
             _log_direct(f"do_paste: click={click_ok}")
 
             time.sleep(PASTE_AFTER_CLICK_DELAY)
-            send_ctrl_key(VK_A)
+            send_ctrl_key(VK_A, PASTE_BETWEEN_KEYS_DELAY)
             time.sleep(PASTE_BETWEEN_KEYS_DELAY)
             tap_key(VK_BACK)
             time.sleep(PASTE_AFTER_CLEAR_DELAY)
-            send_ctrl_key(VK_V)
+            send_ctrl_key(VK_V, PASTE_BETWEEN_KEYS_DELAY)
             if cursor_saved:
                 ctypes.windll.user32.SetCursorPos(old_cursor.x, old_cursor.y)
                 cursor_saved = False
@@ -3273,17 +2842,6 @@ def paste_item_name(name):
             root.after(120, restore_picker_after_paste)
 
     threading.Thread(target=do_paste, daemon=True).start()
-
-
-def get_hwnd_rect(hwnd):
-    if not hwnd:
-        return None
-
-    rect = wintypes.RECT()
-    if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-        return None
-
-    return rect.left, rect.top, rect.right, rect.bottom
 
 
 def get_picker_content_height():
@@ -4247,7 +3805,7 @@ def show_picker(toggle=True):
         return
 
     clear_dead_picker_targets()
-    foreground_hwnd = ctypes.windll.user32.GetForegroundWindow()
+    foreground_hwnd = get_foreground_hwnd()
     if foreground_hwnd and not is_own_overlay_hwnd(foreground_hwnd) and is_game_window(foreground_hwnd):
         picker_target_hwnd = foreground_hwnd
     else:
@@ -4345,10 +3903,6 @@ def hotkey_worker():
                             break
     except Exception as e:
         log_error("hotkey", f"Hotkey worker failed: {e}")
-
-
-def is_virtual_key_down(vk):
-    return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
 
 
 def right_shift_worker():
@@ -4526,7 +4080,7 @@ def keep_on_top():
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             )
 
-        hwnd = get_window_hwnd()
+        hwnd = get_window_hwnd(root)
         ctypes.windll.user32.SetWindowPos(
             hwnd,
             -1,
@@ -4542,62 +4096,6 @@ def keep_on_top():
     root.after(1000, keep_on_top)
 
 
-def get_window_hwnd(window=None):
-    if window is None:
-        window = root
-
-    hwnd = window.winfo_id()
-    parent = ctypes.windll.user32.GetParent(hwnd)
-    return parent or hwnd
-
-
-def apply_no_focus_clickthrough(window, show_in_task_manager=False):
-    window.update_idletasks()
-    hwnd = get_window_hwnd(window)
-    ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-
-    if show_in_task_manager:
-        ex_style = (ex_style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
-    else:
-        ex_style = (ex_style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
-
-    ex_style |= WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
-    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
-    ctypes.windll.user32.SetWindowPos(
-        hwnd,
-        -1,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-    )
-
-
-def apply_no_activate(window, show_in_task_manager=False):
-    window.update_idletasks()
-    hwnd = get_window_hwnd(window)
-    ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-
-    if show_in_task_manager:
-        ex_style = (ex_style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
-    else:
-        ex_style = (ex_style & ~WS_EX_APPWINDOW) | WS_EX_TOOLWINDOW
-
-    ex_style |= WS_EX_NOACTIVATE
-    ex_style &= ~WS_EX_TRANSPARENT
-    ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style)
-    ctypes.windll.user32.SetWindowPos(
-        hwnd,
-        -1,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-    )
-
-
 def make_task_manager_app():
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
@@ -4610,126 +4108,12 @@ def make_task_manager_app():
         pass
 
 
-def show_tk_window_no_activate(window):
-    try:
-        window.deiconify()
-        window.update_idletasks()
-        hwnd = get_window_hwnd(window)
-        ctypes.windll.user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
-        ctypes.windll.user32.SetWindowPos(
-            hwnd,
-            -1,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        )
-    except Exception:
-        window.deiconify()
-
-
-def show_tk_window_on_rect_no_activate(window, rect):
-    try:
-        window.deiconify()
-        window.update_idletasks()
-        hwnd = get_window_hwnd(window)
-        left, top, right, bottom = rect
-        ctypes.windll.user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
-        ctypes.windll.user32.SetWindowPos(
-            hwnd,
-            -1,
-            left,
-            top,
-            right - left,
-            bottom - top,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        )
-    except Exception:
-        window.deiconify()
-
-
 def show_overlay():
     show_tk_window_no_activate(root)
 
 
 def apply_window_region():
     pass
-
-
-def get_monitor_rects():
-    monitors = []
-
-    def callback(hmonitor, hdc, rect, data):
-        info = MONITORINFO()
-        info.cbSize = ctypes.sizeof(MONITORINFO)
-        if ctypes.windll.user32.GetMonitorInfoW(hmonitor, ctypes.byref(info)):
-            monitor_rect = info.rcMonitor
-            monitors.append(
-                {
-                    "primary": bool(info.dwFlags & MONITORINFOF_PRIMARY),
-                    "rect": (
-                        monitor_rect.left,
-                        monitor_rect.top,
-                        monitor_rect.right,
-                        monitor_rect.bottom,
-                    ),
-                }
-            )
-        return 1
-
-    monitor_enum_proc = ctypes.WINFUNCTYPE(
-        wintypes.BOOL,
-        wintypes.HMONITOR,
-        wintypes.HDC,
-        ctypes.POINTER(wintypes.RECT),
-        wintypes.LPARAM,
-    )(callback)
-
-    ctypes.windll.user32.EnumDisplayMonitors(0, 0, monitor_enum_proc, 0)
-    for index, monitor in enumerate(monitors, start=1):
-        monitor["index"] = index
-    return monitors
-
-
-def get_second_monitor_rect():
-    monitors = get_monitor_rects()
-
-    if ALERT_MONITOR_INDEX is not None:
-        for monitor in monitors:
-            if monitor["index"] == ALERT_MONITOR_INDEX:
-                return monitor["rect"]
-
-        log_error(
-            "monitor",
-            f"Configured monitor {ALERT_MONITOR_INDEX} was not found. "
-            f"Detected monitors: {monitors}",
-        )
-
-    for monitor in monitors:
-        if not monitor["primary"]:
-            return monitor["rect"]
-
-    log_error("monitor", f"Second monitor was not found. Detected monitors: {monitors}")
-    return None
-
-
-def get_primary_monitor_rect():
-    monitors = get_monitor_rects()
-    for monitor in monitors:
-        if monitor["primary"]:
-            return monitor["rect"]
-
-    if monitors:
-        return monitors[0]["rect"]
-
-    log_error("monitor", "Primary monitor was not found.")
-    return None
-
-
-def geometry_from_rect(rect):
-    left, top, right, bottom = rect
-    return f"{right - left}x{bottom - top}{left:+d}{top:+d}"
 
 
 def create_primary_monitor_alert():
@@ -4822,7 +4206,7 @@ def create_primary_monitor_alert():
 def create_second_monitor_alert():
     global second_monitor_alert, second_monitor_canvas, second_monitor_rect
 
-    second_monitor_rect = get_second_monitor_rect()
+    second_monitor_rect = get_second_monitor_rect(ALERT_MONITOR_INDEX)
     if second_monitor_rect is None:
         log_error("monitor", "Second monitor alert was not created: no monitor rect.")
         return
