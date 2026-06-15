@@ -14,7 +14,6 @@ from timer_app.config import DEFAULT_SETTINGS, load_settings, setting
 from timer_app.coordinates import (
     DEFAULT_COORDINATES,
     apply_legacy_coordinate_settings,
-    coordinate_pair,
     load_coordinates,
 )
 from timer_app.crossout import (
@@ -30,6 +29,7 @@ from timer_app.crossout import (
     parse_crossout_data,
     read_crossoutcore_filters_cached,
 )
+from timer_app.game import GameActions
 from timer_app.log import append_log_line, log_error
 from timer_app.paths import COORDINATES_PATH, SETTINGS_PATH
 from timer_app.picker.cache import (
@@ -139,117 +139,15 @@ PICKER_FLASH_ROI_COL_WIDTH = 72
 PICKER_PROFIT_COL_WIDTH = 92
 PICKER_DECOR_NAME_COL_WIDTH = 440
 PICKER_DECOR_VALUE_COL_WIDTH = 110
-# Координаты под 4K/масштаб: окно списка справа впритык к поиску, верх на одной высоте.
-PICKER_GAME_SEARCH_X_RATIO, PICKER_GAME_SEARCH_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "picker.window_anchor",
-)
 PICKER_GAME_SEARCH_GAP_PIXELS = 0
 PICKER_GAME_SEARCH_Y_OFFSET_PIXELS = 16
-# Клик внутрь поля поиска.
-PICKER_GAME_SEARCH_CLICK_X_RATIO, PICKER_GAME_SEARCH_CLICK_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "picker.search_field",
-)
-GAME_OPEN_CARD_X_RATIO, GAME_OPEN_CARD_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.open_card",
-)
-GAME_BUY_BUTTON_X_RATIO, GAME_BUY_BUTTON_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.buy_button",
-)
-GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.order_button",
-)
-GAME_QUANTITY_PLUS_X_RATIO, GAME_QUANTITY_PLUS_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.quantity_plus",
-)
-GAME_QUANTITY_MINUS_X_RATIO, GAME_QUANTITY_MINUS_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.quantity_minus",
-)
-GAME_SELL_BUTTON_X_RATIO, GAME_SELL_BUTTON_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.sell_button",
-)
-GAME_SELL_PRICE_CLICK_X_RATIO, GAME_SELL_PRICE_CLICK_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.sell_price_field",
-)
-GAME_SELL_ALL_BUTTON_X_RATIO, GAME_SELL_ALL_BUTTON_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.sell_all_button",
-)
-GAME_SELL_CONFIRM_BUTTON_X_RATIO, GAME_SELL_CONFIRM_BUTTON_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.sell_confirm_button",
-)
 GAME_SELL_CONFIRM_HOLD_SECONDS = 1.0
 GAME_SELL_STEP_DELAY_SECONDS = 0.050
 GAME_ORDER_TO_SELL_DELAY_SECONDS = 0.12
 GAME_OPEN_TO_BUY_DELAY_SECONDS = 0.20
 GAME_BUY_TO_QUANTITY_DELAY_SECONDS = 0.12
-GAME_MARKET_TAB_X_RATIO, GAME_MARKET_TAB_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.market_tab",
-)
-GAME_DETAILS_TAB_X_RATIO, GAME_DETAILS_TAB_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "market.details_tab",
-)
 GAME_SECTION_CLICK_DELAY_SECONDS = 0.045
-SALVAGE_STORAGE_TAB_X_RATIO, SALVAGE_STORAGE_TAB_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.storage_tab",
-)
-SALVAGE_DETAILS_TAB_X_RATIO, SALVAGE_DETAILS_TAB_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.details_tab",
-)
-SALVAGE_PRE_DECOR_CATEGORY_X_RATIO, SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.pre_decor_category",
-)
-SALVAGE_DECOR_CATEGORY_X_RATIO, SALVAGE_DECOR_CATEGORY_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.decor_category",
-)
-SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.sort_dropdown",
-)
-SALVAGE_SORT_NEW_OPTION_X_RATIO, SALVAGE_SORT_NEW_OPTION_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.sort_new_option",
-)
-SALVAGE_SORT_TYPE_OPTION_X_RATIO, SALVAGE_SORT_TYPE_OPTION_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.sort_type_option",
-)
-SALVAGE_FIRST_ITEM_X_RATIO, SALVAGE_FIRST_ITEM_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.first_item",
-)
-SALVAGE_SELECT_ITEM_X_RATIO, SALVAGE_SELECT_ITEM_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.selected_item",
-)
 SALVAGE_ITEM_ROW_STEP_RATIO = 0.233
-SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO, SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.context_disassemble",
-)
-SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.all_button",
-)
-SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO = coordinate_pair(
-    DEFAULT_COORDINATES,
-    "salvage.confirm_button",
-)
 SALVAGE_CONFIRM_HOLD_SECONDS = 0.564
 SALVAGE_CONFIRM_WAIT_SECONDS = 0.25
 SALVAGE_AFTER_CONFIRM_SECONDS = 0.12
@@ -321,6 +219,21 @@ PICKER_SHOW_STATUS = True
 PICKER_STATUS_FG = "#56606b"
 PICKER_PROFILE_REFRESH = True
 
+game = GameActions(
+    DEFAULT_COORDINATES,
+    get_action_hwnd=lambda: get_picker_action_hwnd(),
+    get_hover_delay=lambda: PASTE_HOVER_BEFORE_CLICK_DELAY,
+    get_mouse_click_delay=lambda: MOUSE_CLICK_DELAY,
+    send_click=send_mouse_click,
+    send_right_click=send_mouse_right_click,
+    hold_left_mouse=lambda seconds, stop_event=None, mouse_guard=False: hold_left_mouse(
+        seconds,
+        stop_event=stop_event,
+        mouse_guard=mouse_guard,
+    ),
+)
+
+
 def apply_settings():
     global TEST_MODE, TEST_ALERT_SECONDS, ALERT_START_SECONDS, ALERT_END_SECONDS
     global ALERT_UPDATE_MS, ALERT_MONITOR_INDEX, ALERT_PULSE_PATTERN
@@ -333,37 +246,12 @@ def apply_settings():
     global PICKER_FAST_REFRESH_ATTEMPTS, PICKER_FAST_REFRESH_DELAY_SECONDS
     global PICKER_EMPTY_RETRY_ATTEMPTS, PICKER_EMPTY_RETRY_DELAY_SECONDS
     global PICKER_SHOW_STATUS, PICKER_STATUS_FG, PICKER_PROFILE_REFRESH
-    global PICKER_GAME_SEARCH_X_RATIO, PICKER_GAME_SEARCH_Y_RATIO
     global PICKER_GAME_SEARCH_Y_OFFSET_PIXELS
-    global PICKER_GAME_SEARCH_CLICK_X_RATIO, PICKER_GAME_SEARCH_CLICK_Y_RATIO
-    global GAME_OPEN_CARD_X_RATIO, GAME_OPEN_CARD_Y_RATIO
-    global GAME_BUY_BUTTON_X_RATIO, GAME_BUY_BUTTON_Y_RATIO
-    global GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO
-    global GAME_QUANTITY_PLUS_X_RATIO, GAME_QUANTITY_PLUS_Y_RATIO
-    global GAME_QUANTITY_MINUS_X_RATIO, GAME_QUANTITY_MINUS_Y_RATIO
-    global GAME_SELL_BUTTON_X_RATIO, GAME_SELL_BUTTON_Y_RATIO
-    global GAME_SELL_PRICE_CLICK_X_RATIO, GAME_SELL_PRICE_CLICK_Y_RATIO
-    global GAME_SELL_ALL_BUTTON_X_RATIO, GAME_SELL_ALL_BUTTON_Y_RATIO
-    global GAME_SELL_CONFIRM_BUTTON_X_RATIO, GAME_SELL_CONFIRM_BUTTON_Y_RATIO
     global GAME_SELL_CONFIRM_HOLD_SECONDS, GAME_SELL_STEP_DELAY_SECONDS
     global GAME_ORDER_TO_SELL_DELAY_SECONDS
     global GAME_OPEN_TO_BUY_DELAY_SECONDS, GAME_BUY_TO_QUANTITY_DELAY_SECONDS
-    global GAME_MARKET_TAB_X_RATIO, GAME_MARKET_TAB_Y_RATIO
-    global GAME_DETAILS_TAB_X_RATIO, GAME_DETAILS_TAB_Y_RATIO
     global GAME_SECTION_CLICK_DELAY_SECONDS, PICKER_OPEN_HOLD_SECONDS
-    global SALVAGE_STORAGE_TAB_X_RATIO, SALVAGE_STORAGE_TAB_Y_RATIO
-    global SALVAGE_DETAILS_TAB_X_RATIO, SALVAGE_DETAILS_TAB_Y_RATIO
-    global SALVAGE_PRE_DECOR_CATEGORY_X_RATIO, SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO
-    global SALVAGE_DECOR_CATEGORY_X_RATIO, SALVAGE_DECOR_CATEGORY_Y_RATIO
-    global SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO
-    global SALVAGE_SORT_NEW_OPTION_X_RATIO, SALVAGE_SORT_NEW_OPTION_Y_RATIO
-    global SALVAGE_SORT_TYPE_OPTION_X_RATIO, SALVAGE_SORT_TYPE_OPTION_Y_RATIO
-    global SALVAGE_FIRST_ITEM_X_RATIO, SALVAGE_FIRST_ITEM_Y_RATIO
-    global SALVAGE_SELECT_ITEM_X_RATIO, SALVAGE_SELECT_ITEM_Y_RATIO
     global SALVAGE_ITEM_ROW_STEP_RATIO
-    global SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO, SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO
-    global SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO
-    global SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO
     global SALVAGE_CONFIRM_HOLD_SECONDS, SALVAGE_CONFIRM_WAIT_SECONDS
     global SALVAGE_AFTER_CONFIRM_SECONDS, SALVAGE_STEP_DELAY_SECONDS
     global SALVAGE_ITEM_HOVER_DELAY_SECONDS, SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS
@@ -383,6 +271,7 @@ def apply_settings():
         load_coordinates(COORDINATES_PATH, DEFAULT_COORDINATES),
         SETTINGS_PATH,
     )
+    game.set_coordinates(coordinates)
     TEST_MODE = bool(setting(settings, "test_mode", TEST_MODE))
     TEST_ALERT_SECONDS = float(setting(settings, "test_alert_seconds", TEST_ALERT_SECONDS))
     ALERT_START_SECONDS = float(setting(settings, "alert.start_seconds", ALERT_START_SECONDS))
@@ -441,41 +330,8 @@ def apply_settings():
     PICKER_STATUS_FG = str(setting(settings, "picker.status_alpha_color", PICKER_STATUS_FG))
     PICKER_PROFILE_REFRESH = bool(setting(settings, "picker.profile_refresh", PICKER_PROFILE_REFRESH))
 
-    PICKER_GAME_SEARCH_X_RATIO, PICKER_GAME_SEARCH_Y_RATIO = coordinate_pair(
-        coordinates,
-        "picker.window_anchor",
-    )
     PICKER_GAME_SEARCH_Y_OFFSET_PIXELS = int(
         setting(settings, "game_search.window_y_offset_pixels", PICKER_GAME_SEARCH_Y_OFFSET_PIXELS)
-    )
-    PICKER_GAME_SEARCH_CLICK_X_RATIO, PICKER_GAME_SEARCH_CLICK_Y_RATIO = coordinate_pair(
-        coordinates,
-        "picker.search_field",
-    )
-
-    GAME_OPEN_CARD_X_RATIO, GAME_OPEN_CARD_Y_RATIO = coordinate_pair(coordinates, "market.open_card")
-    GAME_BUY_BUTTON_X_RATIO, GAME_BUY_BUTTON_Y_RATIO = coordinate_pair(coordinates, "market.buy_button")
-    GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO = coordinate_pair(coordinates, "market.order_button")
-    GAME_QUANTITY_PLUS_X_RATIO, GAME_QUANTITY_PLUS_Y_RATIO = coordinate_pair(
-        coordinates,
-        "market.quantity_plus",
-    )
-    GAME_QUANTITY_MINUS_X_RATIO, GAME_QUANTITY_MINUS_Y_RATIO = coordinate_pair(
-        coordinates,
-        "market.quantity_minus",
-    )
-    GAME_SELL_BUTTON_X_RATIO, GAME_SELL_BUTTON_Y_RATIO = coordinate_pair(coordinates, "market.sell_button")
-    GAME_SELL_PRICE_CLICK_X_RATIO, GAME_SELL_PRICE_CLICK_Y_RATIO = coordinate_pair(
-        coordinates,
-        "market.sell_price_field",
-    )
-    GAME_SELL_ALL_BUTTON_X_RATIO, GAME_SELL_ALL_BUTTON_Y_RATIO = coordinate_pair(
-        coordinates,
-        "market.sell_all_button",
-    )
-    GAME_SELL_CONFIRM_BUTTON_X_RATIO, GAME_SELL_CONFIRM_BUTTON_Y_RATIO = coordinate_pair(
-        coordinates,
-        "market.sell_confirm_button",
     )
     GAME_SELL_CONFIRM_HOLD_SECONDS = float(
         setting(settings, "game_actions.sell_confirm_hold_seconds", GAME_SELL_CONFIRM_HOLD_SECONDS)
@@ -492,61 +348,11 @@ def apply_settings():
     GAME_BUY_TO_QUANTITY_DELAY_SECONDS = float(
         setting(settings, "game_actions.buy_to_quantity_delay_seconds", GAME_BUY_TO_QUANTITY_DELAY_SECONDS)
     )
-    GAME_MARKET_TAB_X_RATIO, GAME_MARKET_TAB_Y_RATIO = coordinate_pair(coordinates, "market.market_tab")
-    GAME_DETAILS_TAB_X_RATIO, GAME_DETAILS_TAB_Y_RATIO = coordinate_pair(coordinates, "market.details_tab")
     GAME_SECTION_CLICK_DELAY_SECONDS = float(
         setting(settings, "game_actions.section_click_delay_seconds", GAME_SECTION_CLICK_DELAY_SECONDS)
     )
-    SALVAGE_STORAGE_TAB_X_RATIO, SALVAGE_STORAGE_TAB_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.storage_tab",
-    )
-    SALVAGE_DETAILS_TAB_X_RATIO, SALVAGE_DETAILS_TAB_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.details_tab",
-    )
-    SALVAGE_PRE_DECOR_CATEGORY_X_RATIO, SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.pre_decor_category",
-    )
-    SALVAGE_DECOR_CATEGORY_X_RATIO, SALVAGE_DECOR_CATEGORY_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.decor_category",
-    )
-    SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.sort_dropdown",
-    )
-    SALVAGE_SORT_NEW_OPTION_X_RATIO, SALVAGE_SORT_NEW_OPTION_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.sort_new_option",
-    )
-    SALVAGE_SORT_TYPE_OPTION_X_RATIO, SALVAGE_SORT_TYPE_OPTION_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.sort_type_option",
-    )
-    SALVAGE_FIRST_ITEM_X_RATIO, SALVAGE_FIRST_ITEM_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.first_item",
-    )
-    SALVAGE_SELECT_ITEM_X_RATIO, SALVAGE_SELECT_ITEM_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.selected_item",
-    )
     SALVAGE_ITEM_ROW_STEP_RATIO = float(
         setting(settings, "game_actions.salvage_item_row_step_ratio", SALVAGE_ITEM_ROW_STEP_RATIO)
-    )
-    SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO, SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.context_disassemble",
-    )
-    SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.all_button",
-    )
-    SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO = coordinate_pair(
-        coordinates,
-        "salvage.confirm_button",
     )
     SALVAGE_CONFIRM_HOLD_SECONDS = float(
         setting(settings, "game_actions.salvage_confirm_hold_seconds", SALVAGE_CONFIRM_HOLD_SECONDS)
@@ -1501,8 +1307,9 @@ def click_game_search_field(hwnd, clicks=1):
     left, top, right, bottom = rect
     width = max(1, right - left)
     height = max(1, bottom - top)
-    x = left + round(width * PICKER_GAME_SEARCH_CLICK_X_RATIO)
-    y = top + round(height * PICKER_GAME_SEARCH_CLICK_Y_RATIO)
+    x_ratio, y_ratio = game.point("picker.search_field")
+    x = left + round(width * x_ratio)
+    y = top + round(height * y_ratio)
 
     user32 = ctypes.windll.user32
     user32.SetCursorPos(x, y)
@@ -1572,50 +1379,20 @@ def is_game_button_visible(x_ratio, y_ratio):
     return count_orange_button_samples(x_ratio, y_ratio) >= GAME_BUTTON_SAMPLE_REQUIRED_HITS
 
 
+def is_game_point_visible(point_name):
+    return is_game_button_visible(*game.point(point_name))
+
+
 def detect_market_action_stage():
-    if is_game_button_visible(GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO):
+    if is_game_point_visible("market.order_button"):
         return "quantity"
-    if is_game_button_visible(GAME_BUY_BUTTON_X_RATIO, GAME_BUY_BUTTON_Y_RATIO):
+    if is_game_point_visible("market.buy_button"):
         return "buy"
     return None
 
 
-def move_cursor_to_game_ratio(x_ratio, y_ratio):
-    hwnd = get_picker_action_hwnd()
-    if not hwnd:
-        return False
-
-    point = get_hwnd_ratio_point(hwnd, x_ratio, y_ratio)
-    if point is None:
-        return False
-
-    ctypes.windll.user32.SetCursorPos(point[0], point[1])
-    time.sleep(PASTE_HOVER_BEFORE_CLICK_DELAY)
-    return True
-
-
-def click_game_ratio(x_ratio, y_ratio):
-    if not move_cursor_to_game_ratio(x_ratio, y_ratio):
-        return False
-    return send_mouse_click(MOUSE_CLICK_DELAY)
-
-
-def right_click_game_ratio(x_ratio, y_ratio):
-    if not move_cursor_to_game_ratio(x_ratio, y_ratio):
-        return False
-    return send_mouse_right_click(MOUSE_CLICK_DELAY)
-
-
-def hold_game_ratio(x_ratio, y_ratio, seconds, stop_event=None, mouse_guard=False):
-    if not move_cursor_to_game_ratio(x_ratio, y_ratio):
-        return False
-    if mouse_guard:
-        note_salvage_cursor_pos()
-    return hold_left_mouse(seconds, stop_event=stop_event, mouse_guard=mouse_guard)
-
-
 def open_selected_market_card():
-    return click_game_ratio(GAME_OPEN_CARD_X_RATIO, GAME_OPEN_CARD_Y_RATIO)
+    return game.click("market.open_card")
 
 
 def go_back_from_market_card():
@@ -1627,21 +1404,21 @@ def go_back_from_market_card():
 
 
 def buy_current_market_item():
-    return click_game_ratio(GAME_BUY_BUTTON_X_RATIO, GAME_BUY_BUTTON_Y_RATIO)
+    return game.click("market.buy_button")
 
 
 def increase_market_item_quantity():
-    return click_game_ratio(GAME_QUANTITY_PLUS_X_RATIO, GAME_QUANTITY_PLUS_Y_RATIO)
+    return game.click("market.quantity_plus")
 
 
 def decrease_market_item_quantity():
-    return click_game_ratio(GAME_QUANTITY_MINUS_X_RATIO, GAME_QUANTITY_MINUS_Y_RATIO)
+    return game.click("market.quantity_minus")
 
 
 def open_game_market_details():
-    clicked_market = click_game_ratio(GAME_MARKET_TAB_X_RATIO, GAME_MARKET_TAB_Y_RATIO)
+    clicked_market = game.click("market.market_tab")
     time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
-    clicked_details = click_game_ratio(GAME_DETAILS_TAB_X_RATIO, GAME_DETAILS_TAB_Y_RATIO)
+    clicked_details = game.click("market.details_tab")
     if clicked_market or clicked_details:
         reset_market_action_stage()
     return clicked_market and clicked_details
@@ -1798,32 +1575,32 @@ def sleep_with_stop(seconds, stop_event, mouse_guard=False):
     return not stop_event.is_set()
 
 
-def salvage_click(x_ratio, y_ratio, stop_event, right=False):
+def salvage_click(point_name, stop_event, right=False):
     if stop_event.is_set() or not get_picker_action_hwnd():
         return False
-    ok = right_click_game_ratio(x_ratio, y_ratio) if right else click_game_ratio(x_ratio, y_ratio)
+    ok = game.right_click(point_name) if right else game.click(point_name)
     if ok:
         note_salvage_cursor_pos()
         sleep_with_stop(SALVAGE_STEP_DELAY_SECONDS, stop_event, mouse_guard=True)
     return ok
 
 
-def salvage_click_no_stop(x_ratio, y_ratio):
+def salvage_click_no_stop(point_name):
     if not get_picker_action_hwnd():
         return False
-    ok = click_game_ratio(x_ratio, y_ratio)
+    ok = game.click(point_name)
     if ok:
         time.sleep(SALVAGE_STEP_DELAY_SECONDS)
     return ok
 
 
-def salvage_right_click_item(x_ratio, y_ratio, stop_event):
+def salvage_right_click_item(point_name, stop_event):
     global salvage_last_item_right_click_at
 
     if stop_event.is_set() or not get_picker_action_hwnd():
         return False
 
-    if not move_cursor_to_game_ratio(x_ratio, y_ratio):
+    if not game.move_to(point_name):
         return False
     note_salvage_cursor_pos()
     if not sleep_with_stop(SALVAGE_ITEM_HOVER_DELAY_SECONDS, stop_event, mouse_guard=True):
@@ -1841,18 +1618,18 @@ def salvage_right_click_item(x_ratio, y_ratio, stop_event):
 
 
 def salvage_confirm_available():
-    return is_game_button_visible(SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO)
+    return is_game_point_visible("salvage.confirm_button")
 
 
 def restore_salvage_sort_type():
     if not get_picker_action_hwnd():
         return False
 
-    opened = salvage_click_no_stop(SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO)
+    opened = salvage_click_no_stop("salvage.sort_dropdown")
     if not opened:
         return False
 
-    return salvage_click_no_stop(SALVAGE_SORT_TYPE_OPTION_X_RATIO, SALVAGE_SORT_TYPE_OPTION_Y_RATIO)
+    return salvage_click_no_stop("salvage.sort_type_option")
 
 
 def run_salvage_loop(stop_event):
@@ -1868,32 +1645,23 @@ def run_salvage_loop(stop_event):
         root.after(0, hide_picker)
         sleep_with_stop(0.06, stop_event)
 
-        if not salvage_click(SALVAGE_STORAGE_TAB_X_RATIO, SALVAGE_STORAGE_TAB_Y_RATIO, stop_event):
+        if not salvage_click("salvage.storage_tab", stop_event):
             return
-        if not salvage_click(SALVAGE_DETAILS_TAB_X_RATIO, SALVAGE_DETAILS_TAB_Y_RATIO, stop_event):
+        if not salvage_click("salvage.details_tab", stop_event):
             return
-        if not salvage_click(
-            SALVAGE_PRE_DECOR_CATEGORY_X_RATIO,
-            SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO,
-            stop_event,
-        ):
+        if not salvage_click("salvage.pre_decor_category", stop_event):
             return
-        if not salvage_click(SALVAGE_DECOR_CATEGORY_X_RATIO, SALVAGE_DECOR_CATEGORY_Y_RATIO, stop_event):
+        if not salvage_click("salvage.decor_category", stop_event):
             return
-        if not salvage_click(SALVAGE_SORT_DROPDOWN_X_RATIO, SALVAGE_SORT_DROPDOWN_Y_RATIO, stop_event):
+        if not salvage_click("salvage.sort_dropdown", stop_event):
             return
-        if not salvage_click(SALVAGE_SORT_NEW_OPTION_X_RATIO, SALVAGE_SORT_NEW_OPTION_Y_RATIO, stop_event):
+        if not salvage_click("salvage.sort_new_option", stop_event):
             return
 
-        item_y = SALVAGE_FIRST_ITEM_Y_RATIO
         while not stop_event.is_set() and get_picker_action_hwnd():
-            if not salvage_right_click_item(SALVAGE_FIRST_ITEM_X_RATIO, item_y, stop_event):
+            if not salvage_right_click_item("salvage.first_item", stop_event):
                 break
-            if not salvage_click(
-                SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO,
-                SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO,
-                stop_event,
-            ):
+            if not salvage_click("salvage.context_disassemble", stop_event):
                 break
             if not sleep_with_stop(SALVAGE_POST_MENU_CLICK_DELAY_SECONDS, stop_event, mouse_guard=True):
                 break
@@ -1904,16 +1672,16 @@ def run_salvage_loop(stop_event):
                 append_log_line("salvage stopped: confirm button not found")
                 break
 
-            if not salvage_click(SALVAGE_ALL_BUTTON_X_RATIO, SALVAGE_ALL_BUTTON_Y_RATIO, stop_event):
+            if not salvage_click("salvage.all_button", stop_event):
                 break
             if not sleep_with_stop(SALVAGE_POST_ALL_CLICK_DELAY_SECONDS, stop_event, mouse_guard=True):
                 break
-            if not hold_game_ratio(
-                SALVAGE_CONFIRM_BUTTON_X_RATIO,
-                SALVAGE_CONFIRM_BUTTON_Y_RATIO,
+            if not game.hold(
+                "salvage.confirm_button",
                 SALVAGE_CONFIRM_HOLD_SECONDS,
                 stop_event=stop_event,
                 mouse_guard=True,
+                before_hold=note_salvage_cursor_pos,
             ):
                 break
             if not sleep_with_stop(SALVAGE_AFTER_CONFIRM_SECONDS, stop_event, mouse_guard=True):
@@ -1954,7 +1722,7 @@ def set_order_button_hold(is_down):
     if is_down:
         if detect_market_action_stage() != "quantity":
             return False
-        if not move_cursor_to_game_ratio(GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO):
+        if not game.move_to("market.order_button"):
             return False
         ok = send_mouse_button(MOUSEEVENTF_LEFTDOWN)
         right_shift_order_down = ok
@@ -2142,15 +1910,16 @@ def position_picker_window():
     target_width = max(1, right - left)
     target_height = max(1, bottom - top)
     scale = max(1.0, root.winfo_fpixels("1i") / 96)
+    x_ratio, y_ratio = game.point("picker.window_anchor")
 
     x = (
         left
-        + round(target_width * PICKER_GAME_SEARCH_X_RATIO)
+        + round(target_width * x_ratio)
         + round(PICKER_GAME_SEARCH_GAP_PIXELS * scale)
     )
     y = (
         top
-        + round(target_height * PICKER_GAME_SEARCH_Y_RATIO)
+        + round(target_height * y_ratio)
         + round(PICKER_GAME_SEARCH_Y_OFFSET_PIXELS * scale)
     )
     x -= round(PICKER_LEFT_EXPAND_PIXELS * scale)
