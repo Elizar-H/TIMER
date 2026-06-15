@@ -162,7 +162,7 @@ SALVAGE_SELECT_ITEM_X_RATIO = 0.066927
 SALVAGE_SELECT_ITEM_Y_RATIO = 0.319907
 SALVAGE_ITEM_ROW_STEP_RATIO = 0.233
 SALVAGE_CONTEXT_DISASSEMBLE_X_RATIO = 0.059896
-SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO = 0.608796
+SALVAGE_CONTEXT_DISASSEMBLE_Y_RATIO = 0.606481
 SALVAGE_ALL_BUTTON_X_RATIO = 0.503646
 SALVAGE_ALL_BUTTON_Y_RATIO = 0.471759
 SALVAGE_CONFIRM_BUTTON_X_RATIO = 0.500260
@@ -172,6 +172,7 @@ SALVAGE_CONFIRM_WAIT_SECONDS = 0.25
 SALVAGE_AFTER_CONFIRM_SECONDS = 0.12
 SALVAGE_STEP_DELAY_SECONDS = 0.035
 SALVAGE_ITEM_HOVER_DELAY_SECONDS = 0.03
+SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS = 0.18
 SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS = 0.08
 SALVAGE_POST_MENU_CLICK_DELAY_SECONDS = 0.08
 SALVAGE_POST_ALL_CLICK_DELAY_SECONDS = 0.04
@@ -399,6 +400,7 @@ DEFAULT_SETTINGS = {
         "salvage_after_confirm_seconds": SALVAGE_AFTER_CONFIRM_SECONDS,
         "salvage_step_delay_seconds": SALVAGE_STEP_DELAY_SECONDS,
         "salvage_item_hover_delay_seconds": SALVAGE_ITEM_HOVER_DELAY_SECONDS,
+        "salvage_item_right_click_min_interval_seconds": SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS,
         "salvage_post_right_click_delay_seconds": SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS,
         "salvage_post_menu_click_delay_seconds": SALVAGE_POST_MENU_CLICK_DELAY_SECONDS,
         "salvage_post_all_click_delay_seconds": SALVAGE_POST_ALL_CLICK_DELAY_SECONDS,
@@ -468,7 +470,8 @@ def apply_settings():
     global SALVAGE_CONFIRM_BUTTON_X_RATIO, SALVAGE_CONFIRM_BUTTON_Y_RATIO
     global SALVAGE_CONFIRM_HOLD_SECONDS, SALVAGE_CONFIRM_WAIT_SECONDS
     global SALVAGE_AFTER_CONFIRM_SECONDS, SALVAGE_STEP_DELAY_SECONDS
-    global SALVAGE_ITEM_HOVER_DELAY_SECONDS, SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS
+    global SALVAGE_ITEM_HOVER_DELAY_SECONDS, SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS
+    global SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS
     global SALVAGE_POST_MENU_CLICK_DELAY_SECONDS, SALVAGE_POST_ALL_CLICK_DELAY_SECONDS
     global SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS
     global PICKER_END_RELEASE_GRACE_SECONDS, RIGHT_ARROW_HOLD_SECONDS
@@ -748,6 +751,13 @@ def apply_settings():
             SALVAGE_ITEM_HOVER_DELAY_SECONDS,
         )
     )
+    SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS = float(
+        setting(
+            settings,
+            "game_actions.salvage_item_right_click_min_interval_seconds",
+            SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS,
+        )
+    )
     SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS = float(
         setting(
             settings,
@@ -997,6 +1007,7 @@ picker_end_ignore_until = 0
 salvage_running = False
 salvage_stop_event = threading.Event()
 salvage_expected_cursor_pos = None
+salvage_last_item_right_click_at = 0
 market_action_stage = "open_card"
 market_action_stage_ready_at = 0
 market_action_stage_updated_at = 0
@@ -1018,10 +1029,7 @@ def rotate_log_if_needed():
         if not LOG_PATH.exists() or LOG_PATH.stat().st_size <= LOG_MAX_BYTES:
             return
 
-        old_log_path = LOG_PATH.with_name(f"{LOG_PATH.stem}.old{LOG_PATH.suffix}")
-        if old_log_path.exists():
-            old_log_path.unlink()
-        LOG_PATH.replace(old_log_path)
+        LOG_PATH.unlink()
     except Exception:
         pass
 
@@ -3179,6 +3187,8 @@ def salvage_click_no_stop(x_ratio, y_ratio):
 
 
 def salvage_right_click_item(x_ratio, y_ratio, stop_event):
+    global salvage_last_item_right_click_at
+
     if stop_event.is_set() or not get_picker_action_hwnd():
         return False
 
@@ -3187,8 +3197,14 @@ def salvage_right_click_item(x_ratio, y_ratio, stop_event):
     note_salvage_cursor_pos()
     if not sleep_with_stop(SALVAGE_ITEM_HOVER_DELAY_SECONDS, stop_event, mouse_guard=True):
         return False
+    since_last_right_click = time.monotonic() - salvage_last_item_right_click_at
+    if since_last_right_click < SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS:
+        wait_time = SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS - since_last_right_click
+        if not sleep_with_stop(wait_time, stop_event, mouse_guard=True):
+            return False
     if not send_mouse_right_click():
         return False
+    salvage_last_item_right_click_at = time.monotonic()
     note_salvage_cursor_pos()
     return sleep_with_stop(SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS, stop_event, mouse_guard=True)
 
@@ -3209,13 +3225,15 @@ def restore_salvage_sort_type():
 
 
 def run_salvage_loop(stop_event):
-    global salvage_running
+    global salvage_running, salvage_expected_cursor_pos, salvage_last_item_right_click_at
 
     try:
         hwnd = get_picker_action_hwnd()
         if not hwnd:
             return
 
+        salvage_expected_cursor_pos = None
+        salvage_last_item_right_click_at = 0
         root.after(0, hide_picker)
         sleep_with_stop(0.06, stop_event)
 
@@ -3288,7 +3306,7 @@ def toggle_salvage_loop():
         send_mouse_button(MOUSEEVENTF_LEFTUP)
         return
 
-    if not is_picker_open() or not get_picker_action_hwnd():
+    if not get_picker_action_hwnd():
         return
 
     salvage_stop_event.clear()
