@@ -1,0 +1,92 @@
+{
+  "test_mode": false,
+  "test_alert_seconds": 0.5,
+  "alert": {
+    "start_seconds": 0,
+    "end_seconds": -2,
+    "update_ms": 16,
+    "monitor_index": 2,
+    "pulse_pattern": [
+      ["rise", 0.07, 1.0],
+      ["fall", 0.105, 1.0],
+      ["off", 0.06, 0.0],
+      ["rise", 0.05, 0.86],
+      ["fall", 0.125, 0.86],
+      ["off", 0.31, 0.0]
+    ],
+    "color": "#f0cf23",
+    "min_alpha": 0.24,
+    "max_alpha": 1.0,
+    "primary_min_alpha": 0.28,
+    "primary_max_alpha": 1.0,
+    "primary_border_thickness": 42,
+    "second_min_alpha": 0.3,
+    "second_max_alpha": 1.0,
+    "second_border_thickness": 30
+  },
+  "notch": {
+    "width": 100,
+    "height": 24,
+    "radius": 7,
+    "font_pixels": 13,
+    "normal_alpha": 0.21,
+    "normal_bg": "#111111",
+    "normal_fg": "#505050"
+  },
+  "picker": {
+    "width": 860,
+    "max_height": 760,
+    "row_height": 42,
+    "refresh_seconds": 30,
+    "background_refresh_seconds": 10,
+    "fast_refresh_attempts": 5,
+    "fast_refresh_delay_seconds": 0.35,
+    "empty_retry_attempts": 3,
+    "empty_retry_delay_seconds": 0.22,
+    "show_status": true,
+    "status_alpha_color": "#56606b",
+    "profile_refresh": true
+  },
+  "game_search": {
+    "window_x_ratio": 0.292,
+    "window_y_ratio": 0.147,
+    "window_y_offset_pixels": 16,
+    "click_x_ratio": 0.245,
+    "click_y_ratio": 0.17
+  },
+  "game_actions": {
+    "open_card_x_ratio": 0.54,
+    "open_card_y_ratio": 0.281,
+    "buy_button_x_ratio": 0.069,
+    "buy_button_y_ratio": 0.904,
+    "order_button_x_ratio": 0.515,
+    "order_button_y_ratio": 0.653,
+    "quantity_plus_x_ratio": 0.523,
+    "quantity_plus_y_ratio": 0.512,
+    "quantity_minus_x_ratio": 0.469,
+    "quantity_minus_y_ratio": 0.512,
+    "open_to_buy_delay_seconds": 0.2,
+    "buy_to_quantity_delay_seconds": 0.12,
+    "market_tab_x_ratio": 0.383,
+    "market_tab_y_ratio": 0.033,
+    "details_tab_x_ratio": 0.421,
+    "details_tab_y_ratio": 0.088,
+    "section_click_delay_seconds": 0.045,
+    "picker_open_hold_seconds": 0.2,
+    "picker_end_release_grace_seconds": 0.05,
+    "right_arrow_hold_seconds": 0.09,
+    "market_action_stage_max_age_seconds": 1.1,
+    "right_shift_poll_seconds": 0.01
+  },
+  "paste": {
+    "before_click_delay": 0.002,
+    "hover_before_click_delay": 0.01,
+    "after_click_delay": 0.02,
+    "after_clear_delay": 0.004,
+    "between_keys_delay": 0.002,
+    "before_enter_delay": 0.04,
+    "enter_key_delay": 0.005,
+    "search_clicks": 2,
+    "mouse_click_delay": 0.003
+  }
+}

@@ -26,6 +26,7 @@ import threading
 import queue
 import math
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 import re
@@ -33,12 +34,29 @@ import time
 import urllib.request
 import tkinter as tk
 import tkinter.font as tkfont
+from timer_settings import load_settings, setting
 
 FLASH_URL = "https://crossoutcore.ru/flash-crashes/"
 RECYCLING_URL = "https://crossoutcore.ru/recycling/"
 URL = FLASH_URL
 SERVER_TIME_RE = re.compile(r'\\?"serverTime\\?":(\d+)')
 TARGET_TIME_RE = re.compile(r'\\?"targetUpdateTimestamp\\?":(\d+)')
+NEXT_ACTION_DATE_RE = re.compile(r'"\$D([^"]+)"')
+ITEM_PATTERN = re.compile(
+    r'\{\\"id\\":(\d+),\\"name\\":\\"(.*?)\\",\\"rarityId\\":'
+    r'(null|\d+),\\"factionId\\":(null|\d+),\\"categoryId\\":'
+    r'(null|\d+),\\"typeId\\":(null|\d+).*?\\"removed\\":(\d+),'
+    r'\\"amount\\":(\d+),\\"craftable\\":(\d+)',
+    re.DOTALL,
+)
+MARKET_PATTERN = re.compile(
+    r'\\"(\d+)\\":\{\\"s\\":([0-9.]+),\\"b\\":([0-9.]+),'
+    r'\\"so\\":(\d+),\\"bo\\":(\d+),[^}]*?\\"t\\":(\d+)\}'
+)
+HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept-Encoding": "identity",
+}
 
 # Настройки
 APP_ID = "CrossoutCore.Timer"
@@ -46,20 +64,29 @@ TEST_MODE = False
 TEST_ALERT_SECONDS = 0.5
 ALERT_START_SECONDS = 0
 ALERT_END_SECONDS = -2
-ALERT_FADE_IN_SECONDS = 0.08
-ALERT_FADE_OUT_SECONDS = 0.14
-ALERT_OFF_GAP_SECONDS = 0.16
+ALERT_PULSE_PATTERN = (
+    ("rise", 0.070, 1.00),
+    ("fall", 0.105, 1.00),
+    ("off", 0.060, 0.00),
+    ("rise", 0.050, 0.86),
+    ("fall", 0.125, 0.86),
+    ("off", 0.310, 0.00),
+)
 ALERT_UPDATE_MS = 16
 SHOW_MILLISECONDS_ALWAYS = True
+SHOW_NOTCH_OVERLAY = False
 ALERT_MONITOR_INDEX = 2
 LOG_PATH = Path(__file__).with_name("timer.log")
+LOG_MAX_BYTES = 512 * 1024
+SETTINGS_PATH = Path(__file__).with_name("settings.json")
 PICKER_CACHE_PATH = Path(__file__).with_name("timer_items_cache.json")
-PICKER_CACHE_VERSION = 8
+PICKER_CACHE_VERSION = 14
 PICKER_REFRESH_SECONDS = 30
 PICKER_BACKGROUND_REFRESH_SECONDS = 10
 PICKER_FAST_REFRESH_ATTEMPTS = 5
 PICKER_FAST_REFRESH_DELAY_SECONDS = 0.35
 PICKER_CACHE_MAX_AGE_SECONDS = 45
+FILTERS_CACHE_SECONDS = 1.5
 PICKER_WIDTH = 860
 PICKER_MAX_HEIGHT = 760
 PICKER_MIN_ROWS = 4
@@ -81,29 +108,86 @@ PICKER_DECOR_CATEGORIES = {6}
 PICKER_GAME_SEARCH_X_RATIO = 0.292
 PICKER_GAME_SEARCH_Y_RATIO = 0.147
 PICKER_GAME_SEARCH_GAP_PIXELS = 0
-PICKER_GAME_SEARCH_Y_OFFSET_PIXELS = 0
+PICKER_GAME_SEARCH_Y_OFFSET_PIXELS = 16
 # Клик внутрь поля поиска.
 PICKER_GAME_SEARCH_CLICK_X_RATIO = 0.245
 PICKER_GAME_SEARCH_CLICK_Y_RATIO = 0.170
+GAME_OPEN_CARD_X_RATIO = 0.540
+GAME_OPEN_CARD_Y_RATIO = 0.281
+GAME_BUY_BUTTON_X_RATIO = 0.069
+GAME_BUY_BUTTON_Y_RATIO = 0.904
+GAME_ORDER_BUTTON_X_RATIO = 0.515
+GAME_ORDER_BUTTON_Y_RATIO = 0.653
+GAME_QUANTITY_PLUS_X_RATIO = 0.523
+GAME_QUANTITY_PLUS_Y_RATIO = 0.512
+GAME_QUANTITY_MINUS_X_RATIO = 0.469
+GAME_QUANTITY_MINUS_Y_RATIO = 0.512
+GAME_OPEN_TO_BUY_DELAY_SECONDS = 0.20
+GAME_BUY_TO_QUANTITY_DELAY_SECONDS = 0.12
+GAME_MARKET_TAB_X_RATIO = 0.383
+GAME_MARKET_TAB_Y_RATIO = 0.033
+GAME_DETAILS_TAB_X_RATIO = 0.421
+GAME_DETAILS_TAB_Y_RATIO = 0.088
+GAME_SECTION_CLICK_DELAY_SECONDS = 0.045
+PICKER_OPEN_HOLD_SECONDS = 0.20
+PICKER_END_RELEASE_GRACE_SECONDS = 0.05
+RIGHT_ARROW_HOLD_SECONDS = 0.09
+MARKET_ACTION_STAGE_MAX_AGE_SECONDS = 1.10
+GAME_BUTTON_SAMPLE_OFFSETS = (
+    (-70, -10),
+    (-45, 12),
+    (-25, 18),
+    (25, 18),
+    (45, 12),
+    (70, -10),
+)
+GAME_BUTTON_SAMPLE_REQUIRED_HITS = 1
+GAME_BUTTON_ORANGE_MIN_R = 110
+GAME_BUTTON_ORANGE_MIN_G = 35
+GAME_BUTTON_ORANGE_MAX_B = 80
+GAME_BUTTON_ORANGE_MIN_RG_DIFF = 20
+RIGHT_SHIFT_POLL_SECONDS = 0.010
 # Скорость вставки. Если игра иногда не успевает сфокусировать поле, увеличь PASTE_AFTER_CLICK_DELAY до 0.03-0.05.
 PASTE_BEFORE_CLICK_DELAY = 0.002
-PASTE_HOVER_BEFORE_CLICK_DELAY = 0.018
-PASTE_AFTER_CLICK_DELAY = 0.030
-PASTE_AFTER_CLEAR_DELAY = 0.008
-PASTE_BETWEEN_KEYS_DELAY = 0.003
-PASTE_BEFORE_ENTER_DELAY = 0.055
-PASTE_ENTER_KEY_DELAY = 0.008
+PASTE_HOVER_BEFORE_CLICK_DELAY = 0.010
+PASTE_AFTER_CLICK_DELAY = 0.020
+PASTE_AFTER_CLEAR_DELAY = 0.004
+PASTE_BETWEEN_KEYS_DELAY = 0.002
+PASTE_BEFORE_ENTER_DELAY = 0.040
+PASTE_ENTER_KEY_DELAY = 0.005
 PASTE_SEARCH_CLICKS = 2
-MOUSE_CLICK_DELAY = 0.006
+MOUSE_CLICK_DELAY = 0.003
 PICKER_HOTKEY_ID = 7311
+PICKER_OPEN_END_HOTKEY_ID = 7316
 PICKER_HOTKEY_VK = 0xC0
 WM_HOTKEY = 0x0312
+WM_APP_HOTKEY_COMMAND = 0x8001
 ITEM_PICKER_TITLE = "Crossout Item Picker"
 MARKET_MINUTES_ACTION = "00a3c6f09401f51e0f2f5197309fad70a0f23590be"
 FLASH_ANALYSIS_MINUTES = 60
 FLASH_MIN_PROFIT = 1
 FLASH_MIN_REQUESTS = 0
 FLASH_MIN_BUYER_RATIO = 0
+FILTER_STORAGE_KEYS = {
+    "flash_min_profit": ("anomalyMinProfit", "Profit"),
+    "flash_min_requests": ("anomalyMinBo", "MinBo"),
+    "flash_time_window": ("anomalyTimeWindow", "TimeWindow"),
+    "flash_min_buyer_ratio": ("anomalyMinBuyerRatio",),
+    "recycling_rarities": ("Recycling-rarities", "rarities"),
+    "recycling_buy_mode": ("Recycling-buy-mode", "buy-mode"),
+    "recycling_sell_mode": ("Recycling-sell-mode", "sell-mode"),
+    "recycling_show_only_sale_lots": (
+        "Recycling-show-only-with-sale-lots",
+        "show-only-with-sale-lots",
+        "how-only-with-sale-lots",
+    ),
+}
+FILTER_NUMERIC_SPECS = {
+    "flash_min_profit": {"min": 0, "max": None, "prefer": "longest"},
+    "flash_min_requests": {"min": 0, "max": None, "prefer": "first"},
+    "flash_time_window": {"min": 15, "max": 240, "prefer": "longest"},
+    "flash_min_buyer_ratio": {"min": 0, "max": 100, "prefer": "longest"},
+}
 # Декор: считаем прибыль строго/консервативно.
 # Покупка декора по продаже (s), продажа ресурсов сразу в запросы на покупку (b).
 RECYCLING_FORCE_INSTANT_PROFIT_PRICES = False
@@ -145,14 +229,303 @@ NORMAL_FG = "#505050"
 NORMAL_ALPHA = 0.21
 ALERT_BG = "#f0cf23"
 ALERT_FG = "#111111"
-ALERT_MIN_ALPHA = 0.00
+ALERT_MIN_ALPHA = 0.24
 ALERT_ALPHA = 1.00
-PRIMARY_MONITOR_MIN_ALPHA = 1.00
+PRIMARY_MONITOR_MIN_ALPHA = 0.28
 PRIMARY_MONITOR_ALPHA = 1.00
-PRIMARY_MONITOR_BORDER_THICKNESS = 24
-SECOND_MONITOR_MIN_ALPHA = 1.00
+PRIMARY_MONITOR_BORDER_THICKNESS = 42
+SECOND_MONITOR_MIN_ALPHA = 0.30
 SECOND_MONITOR_ALPHA = 1.00
-SECOND_MONITOR_BORDER_THICKNESS = 13
+SECOND_MONITOR_BORDER_THICKNESS = 30
+PICKER_EMPTY_RETRY_ATTEMPTS = 3
+PICKER_EMPTY_RETRY_DELAY_SECONDS = 0.22
+PICKER_SHOW_STATUS = True
+PICKER_STATUS_FG = "#56606b"
+PICKER_PROFILE_REFRESH = True
+
+DEFAULT_SETTINGS = {
+    "test_mode": TEST_MODE,
+    "test_alert_seconds": TEST_ALERT_SECONDS,
+    "alert": {
+        "start_seconds": ALERT_START_SECONDS,
+        "end_seconds": ALERT_END_SECONDS,
+        "update_ms": ALERT_UPDATE_MS,
+        "monitor_index": ALERT_MONITOR_INDEX,
+        "pulse_pattern": ALERT_PULSE_PATTERN,
+        "color": ALERT_BG,
+        "min_alpha": ALERT_MIN_ALPHA,
+        "max_alpha": ALERT_ALPHA,
+        "primary_min_alpha": PRIMARY_MONITOR_MIN_ALPHA,
+        "primary_max_alpha": PRIMARY_MONITOR_ALPHA,
+        "primary_border_thickness": PRIMARY_MONITOR_BORDER_THICKNESS,
+        "second_min_alpha": SECOND_MONITOR_MIN_ALPHA,
+        "second_max_alpha": SECOND_MONITOR_ALPHA,
+        "second_border_thickness": SECOND_MONITOR_BORDER_THICKNESS,
+    },
+    "notch": {
+        "width": BASE_NOTCH_WIDTH,
+        "height": BASE_NOTCH_HEIGHT,
+        "radius": BASE_NOTCH_RADIUS,
+        "font_pixels": BASE_FONT_PIXELS,
+        "normal_alpha": NORMAL_ALPHA,
+        "normal_bg": NORMAL_BG,
+        "normal_fg": NORMAL_FG,
+    },
+    "picker": {
+        "width": PICKER_WIDTH,
+        "max_height": PICKER_MAX_HEIGHT,
+        "row_height": PICKER_ROW_HEIGHT,
+        "refresh_seconds": PICKER_REFRESH_SECONDS,
+        "background_refresh_seconds": PICKER_BACKGROUND_REFRESH_SECONDS,
+        "fast_refresh_attempts": PICKER_FAST_REFRESH_ATTEMPTS,
+        "fast_refresh_delay_seconds": PICKER_FAST_REFRESH_DELAY_SECONDS,
+        "empty_retry_attempts": PICKER_EMPTY_RETRY_ATTEMPTS,
+        "empty_retry_delay_seconds": PICKER_EMPTY_RETRY_DELAY_SECONDS,
+        "show_status": PICKER_SHOW_STATUS,
+        "status_alpha_color": PICKER_STATUS_FG,
+        "profile_refresh": PICKER_PROFILE_REFRESH,
+    },
+    "game_search": {
+        "window_x_ratio": PICKER_GAME_SEARCH_X_RATIO,
+        "window_y_ratio": PICKER_GAME_SEARCH_Y_RATIO,
+        "window_y_offset_pixels": PICKER_GAME_SEARCH_Y_OFFSET_PIXELS,
+        "click_x_ratio": PICKER_GAME_SEARCH_CLICK_X_RATIO,
+        "click_y_ratio": PICKER_GAME_SEARCH_CLICK_Y_RATIO,
+    },
+    "game_actions": {
+        "open_card_x_ratio": GAME_OPEN_CARD_X_RATIO,
+        "open_card_y_ratio": GAME_OPEN_CARD_Y_RATIO,
+        "buy_button_x_ratio": GAME_BUY_BUTTON_X_RATIO,
+        "buy_button_y_ratio": GAME_BUY_BUTTON_Y_RATIO,
+        "order_button_x_ratio": GAME_ORDER_BUTTON_X_RATIO,
+        "order_button_y_ratio": GAME_ORDER_BUTTON_Y_RATIO,
+        "quantity_plus_x_ratio": GAME_QUANTITY_PLUS_X_RATIO,
+        "quantity_plus_y_ratio": GAME_QUANTITY_PLUS_Y_RATIO,
+        "quantity_minus_x_ratio": GAME_QUANTITY_MINUS_X_RATIO,
+        "quantity_minus_y_ratio": GAME_QUANTITY_MINUS_Y_RATIO,
+        "open_to_buy_delay_seconds": GAME_OPEN_TO_BUY_DELAY_SECONDS,
+        "buy_to_quantity_delay_seconds": GAME_BUY_TO_QUANTITY_DELAY_SECONDS,
+        "market_tab_x_ratio": GAME_MARKET_TAB_X_RATIO,
+        "market_tab_y_ratio": GAME_MARKET_TAB_Y_RATIO,
+        "details_tab_x_ratio": GAME_DETAILS_TAB_X_RATIO,
+        "details_tab_y_ratio": GAME_DETAILS_TAB_Y_RATIO,
+        "section_click_delay_seconds": GAME_SECTION_CLICK_DELAY_SECONDS,
+        "picker_open_hold_seconds": PICKER_OPEN_HOLD_SECONDS,
+        "picker_end_release_grace_seconds": PICKER_END_RELEASE_GRACE_SECONDS,
+        "right_arrow_hold_seconds": RIGHT_ARROW_HOLD_SECONDS,
+        "market_action_stage_max_age_seconds": MARKET_ACTION_STAGE_MAX_AGE_SECONDS,
+        "right_shift_poll_seconds": RIGHT_SHIFT_POLL_SECONDS,
+    },
+    "paste": {
+        "before_click_delay": PASTE_BEFORE_CLICK_DELAY,
+        "hover_before_click_delay": PASTE_HOVER_BEFORE_CLICK_DELAY,
+        "after_click_delay": PASTE_AFTER_CLICK_DELAY,
+        "after_clear_delay": PASTE_AFTER_CLEAR_DELAY,
+        "between_keys_delay": PASTE_BETWEEN_KEYS_DELAY,
+        "before_enter_delay": PASTE_BEFORE_ENTER_DELAY,
+        "enter_key_delay": PASTE_ENTER_KEY_DELAY,
+        "search_clicks": PASTE_SEARCH_CLICKS,
+        "mouse_click_delay": MOUSE_CLICK_DELAY,
+    },
+}
+
+
+def apply_settings():
+    global TEST_MODE, TEST_ALERT_SECONDS, ALERT_START_SECONDS, ALERT_END_SECONDS
+    global ALERT_UPDATE_MS, ALERT_MONITOR_INDEX, ALERT_PULSE_PATTERN
+    global BASE_NOTCH_WIDTH, BASE_NOTCH_HEIGHT, BASE_NOTCH_RADIUS, BASE_FONT_PIXELS
+    global NORMAL_BG, NORMAL_FG, NORMAL_ALPHA, ALERT_BG, ALERT_MIN_ALPHA, ALERT_ALPHA
+    global PRIMARY_MONITOR_MIN_ALPHA, PRIMARY_MONITOR_ALPHA, PRIMARY_MONITOR_BORDER_THICKNESS
+    global SECOND_MONITOR_MIN_ALPHA, SECOND_MONITOR_ALPHA, SECOND_MONITOR_BORDER_THICKNESS
+    global PICKER_WIDTH, PICKER_MAX_HEIGHT, PICKER_ROW_HEIGHT
+    global PICKER_REFRESH_SECONDS, PICKER_BACKGROUND_REFRESH_SECONDS
+    global PICKER_FAST_REFRESH_ATTEMPTS, PICKER_FAST_REFRESH_DELAY_SECONDS
+    global PICKER_EMPTY_RETRY_ATTEMPTS, PICKER_EMPTY_RETRY_DELAY_SECONDS
+    global PICKER_SHOW_STATUS, PICKER_STATUS_FG, PICKER_PROFILE_REFRESH
+    global PICKER_GAME_SEARCH_X_RATIO, PICKER_GAME_SEARCH_Y_RATIO
+    global PICKER_GAME_SEARCH_Y_OFFSET_PIXELS
+    global PICKER_GAME_SEARCH_CLICK_X_RATIO, PICKER_GAME_SEARCH_CLICK_Y_RATIO
+    global GAME_OPEN_CARD_X_RATIO, GAME_OPEN_CARD_Y_RATIO
+    global GAME_BUY_BUTTON_X_RATIO, GAME_BUY_BUTTON_Y_RATIO
+    global GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO
+    global GAME_QUANTITY_PLUS_X_RATIO, GAME_QUANTITY_PLUS_Y_RATIO
+    global GAME_QUANTITY_MINUS_X_RATIO, GAME_QUANTITY_MINUS_Y_RATIO
+    global GAME_OPEN_TO_BUY_DELAY_SECONDS, GAME_BUY_TO_QUANTITY_DELAY_SECONDS
+    global GAME_MARKET_TAB_X_RATIO, GAME_MARKET_TAB_Y_RATIO
+    global GAME_DETAILS_TAB_X_RATIO, GAME_DETAILS_TAB_Y_RATIO
+    global GAME_SECTION_CLICK_DELAY_SECONDS, PICKER_OPEN_HOLD_SECONDS
+    global PICKER_END_RELEASE_GRACE_SECONDS, RIGHT_ARROW_HOLD_SECONDS
+    global MARKET_ACTION_STAGE_MAX_AGE_SECONDS
+    global RIGHT_SHIFT_POLL_SECONDS
+    global PASTE_BEFORE_CLICK_DELAY, PASTE_HOVER_BEFORE_CLICK_DELAY
+    global PASTE_AFTER_CLICK_DELAY, PASTE_AFTER_CLEAR_DELAY, PASTE_BETWEEN_KEYS_DELAY
+    global PASTE_BEFORE_ENTER_DELAY, PASTE_ENTER_KEY_DELAY, PASTE_SEARCH_CLICKS
+    global MOUSE_CLICK_DELAY
+
+    settings = load_settings(SETTINGS_PATH, DEFAULT_SETTINGS)
+    TEST_MODE = bool(setting(settings, "test_mode", TEST_MODE))
+    TEST_ALERT_SECONDS = float(setting(settings, "test_alert_seconds", TEST_ALERT_SECONDS))
+    ALERT_START_SECONDS = float(setting(settings, "alert.start_seconds", ALERT_START_SECONDS))
+    ALERT_END_SECONDS = float(setting(settings, "alert.end_seconds", ALERT_END_SECONDS))
+    ALERT_UPDATE_MS = int(setting(settings, "alert.update_ms", ALERT_UPDATE_MS))
+    ALERT_MONITOR_INDEX = int(setting(settings, "alert.monitor_index", ALERT_MONITOR_INDEX))
+    ALERT_PULSE_PATTERN = tuple(
+        tuple(item) for item in setting(settings, "alert.pulse_pattern", ALERT_PULSE_PATTERN)
+    )
+    ALERT_BG = str(setting(settings, "alert.color", ALERT_BG))
+    ALERT_MIN_ALPHA = float(setting(settings, "alert.min_alpha", ALERT_MIN_ALPHA))
+    ALERT_ALPHA = float(setting(settings, "alert.max_alpha", ALERT_ALPHA))
+    PRIMARY_MONITOR_MIN_ALPHA = float(
+        setting(settings, "alert.primary_min_alpha", PRIMARY_MONITOR_MIN_ALPHA)
+    )
+    PRIMARY_MONITOR_ALPHA = float(setting(settings, "alert.primary_max_alpha", PRIMARY_MONITOR_ALPHA))
+    PRIMARY_MONITOR_BORDER_THICKNESS = int(
+        setting(settings, "alert.primary_border_thickness", PRIMARY_MONITOR_BORDER_THICKNESS)
+    )
+    SECOND_MONITOR_MIN_ALPHA = float(
+        setting(settings, "alert.second_min_alpha", SECOND_MONITOR_MIN_ALPHA)
+    )
+    SECOND_MONITOR_ALPHA = float(setting(settings, "alert.second_max_alpha", SECOND_MONITOR_ALPHA))
+    SECOND_MONITOR_BORDER_THICKNESS = int(
+        setting(settings, "alert.second_border_thickness", SECOND_MONITOR_BORDER_THICKNESS)
+    )
+
+    BASE_NOTCH_WIDTH = int(setting(settings, "notch.width", BASE_NOTCH_WIDTH))
+    BASE_NOTCH_HEIGHT = int(setting(settings, "notch.height", BASE_NOTCH_HEIGHT))
+    BASE_NOTCH_RADIUS = int(setting(settings, "notch.radius", BASE_NOTCH_RADIUS))
+    BASE_FONT_PIXELS = int(setting(settings, "notch.font_pixels", BASE_FONT_PIXELS))
+    NORMAL_ALPHA = float(setting(settings, "notch.normal_alpha", NORMAL_ALPHA))
+    NORMAL_BG = str(setting(settings, "notch.normal_bg", NORMAL_BG))
+    NORMAL_FG = str(setting(settings, "notch.normal_fg", NORMAL_FG))
+
+    PICKER_WIDTH = int(setting(settings, "picker.width", PICKER_WIDTH))
+    PICKER_MAX_HEIGHT = int(setting(settings, "picker.max_height", PICKER_MAX_HEIGHT))
+    PICKER_ROW_HEIGHT = int(setting(settings, "picker.row_height", PICKER_ROW_HEIGHT))
+    PICKER_REFRESH_SECONDS = float(setting(settings, "picker.refresh_seconds", PICKER_REFRESH_SECONDS))
+    PICKER_BACKGROUND_REFRESH_SECONDS = float(
+        setting(settings, "picker.background_refresh_seconds", PICKER_BACKGROUND_REFRESH_SECONDS)
+    )
+    PICKER_FAST_REFRESH_ATTEMPTS = int(
+        setting(settings, "picker.fast_refresh_attempts", PICKER_FAST_REFRESH_ATTEMPTS)
+    )
+    PICKER_FAST_REFRESH_DELAY_SECONDS = float(
+        setting(settings, "picker.fast_refresh_delay_seconds", PICKER_FAST_REFRESH_DELAY_SECONDS)
+    )
+    PICKER_EMPTY_RETRY_ATTEMPTS = int(
+        setting(settings, "picker.empty_retry_attempts", PICKER_EMPTY_RETRY_ATTEMPTS)
+    )
+    PICKER_EMPTY_RETRY_DELAY_SECONDS = float(
+        setting(settings, "picker.empty_retry_delay_seconds", PICKER_EMPTY_RETRY_DELAY_SECONDS)
+    )
+    PICKER_SHOW_STATUS = bool(setting(settings, "picker.show_status", PICKER_SHOW_STATUS))
+    PICKER_STATUS_FG = str(setting(settings, "picker.status_alpha_color", PICKER_STATUS_FG))
+    PICKER_PROFILE_REFRESH = bool(setting(settings, "picker.profile_refresh", PICKER_PROFILE_REFRESH))
+
+    PICKER_GAME_SEARCH_X_RATIO = float(
+        setting(settings, "game_search.window_x_ratio", PICKER_GAME_SEARCH_X_RATIO)
+    )
+    PICKER_GAME_SEARCH_Y_RATIO = float(
+        setting(settings, "game_search.window_y_ratio", PICKER_GAME_SEARCH_Y_RATIO)
+    )
+    PICKER_GAME_SEARCH_Y_OFFSET_PIXELS = int(
+        setting(settings, "game_search.window_y_offset_pixels", PICKER_GAME_SEARCH_Y_OFFSET_PIXELS)
+    )
+    PICKER_GAME_SEARCH_CLICK_X_RATIO = float(
+        setting(settings, "game_search.click_x_ratio", PICKER_GAME_SEARCH_CLICK_X_RATIO)
+    )
+    PICKER_GAME_SEARCH_CLICK_Y_RATIO = float(
+        setting(settings, "game_search.click_y_ratio", PICKER_GAME_SEARCH_CLICK_Y_RATIO)
+    )
+
+    GAME_OPEN_CARD_X_RATIO = float(
+        setting(settings, "game_actions.open_card_x_ratio", GAME_OPEN_CARD_X_RATIO)
+    )
+    GAME_OPEN_CARD_Y_RATIO = float(
+        setting(settings, "game_actions.open_card_y_ratio", GAME_OPEN_CARD_Y_RATIO)
+    )
+    GAME_BUY_BUTTON_X_RATIO = float(
+        setting(settings, "game_actions.buy_button_x_ratio", GAME_BUY_BUTTON_X_RATIO)
+    )
+    GAME_BUY_BUTTON_Y_RATIO = float(
+        setting(settings, "game_actions.buy_button_y_ratio", GAME_BUY_BUTTON_Y_RATIO)
+    )
+    GAME_ORDER_BUTTON_X_RATIO = float(
+        setting(settings, "game_actions.order_button_x_ratio", GAME_ORDER_BUTTON_X_RATIO)
+    )
+    GAME_ORDER_BUTTON_Y_RATIO = float(
+        setting(settings, "game_actions.order_button_y_ratio", GAME_ORDER_BUTTON_Y_RATIO)
+    )
+    GAME_QUANTITY_PLUS_X_RATIO = float(
+        setting(settings, "game_actions.quantity_plus_x_ratio", GAME_QUANTITY_PLUS_X_RATIO)
+    )
+    GAME_QUANTITY_PLUS_Y_RATIO = float(
+        setting(settings, "game_actions.quantity_plus_y_ratio", GAME_QUANTITY_PLUS_Y_RATIO)
+    )
+    GAME_QUANTITY_MINUS_X_RATIO = float(
+        setting(settings, "game_actions.quantity_minus_x_ratio", GAME_QUANTITY_MINUS_X_RATIO)
+    )
+    GAME_QUANTITY_MINUS_Y_RATIO = float(
+        setting(settings, "game_actions.quantity_minus_y_ratio", GAME_QUANTITY_MINUS_Y_RATIO)
+    )
+    GAME_OPEN_TO_BUY_DELAY_SECONDS = float(
+        setting(settings, "game_actions.open_to_buy_delay_seconds", GAME_OPEN_TO_BUY_DELAY_SECONDS)
+    )
+    GAME_BUY_TO_QUANTITY_DELAY_SECONDS = float(
+        setting(settings, "game_actions.buy_to_quantity_delay_seconds", GAME_BUY_TO_QUANTITY_DELAY_SECONDS)
+    )
+    GAME_MARKET_TAB_X_RATIO = float(
+        setting(settings, "game_actions.market_tab_x_ratio", GAME_MARKET_TAB_X_RATIO)
+    )
+    GAME_MARKET_TAB_Y_RATIO = float(
+        setting(settings, "game_actions.market_tab_y_ratio", GAME_MARKET_TAB_Y_RATIO)
+    )
+    GAME_DETAILS_TAB_X_RATIO = float(
+        setting(settings, "game_actions.details_tab_x_ratio", GAME_DETAILS_TAB_X_RATIO)
+    )
+    GAME_DETAILS_TAB_Y_RATIO = float(
+        setting(settings, "game_actions.details_tab_y_ratio", GAME_DETAILS_TAB_Y_RATIO)
+    )
+    GAME_SECTION_CLICK_DELAY_SECONDS = float(
+        setting(settings, "game_actions.section_click_delay_seconds", GAME_SECTION_CLICK_DELAY_SECONDS)
+    )
+    PICKER_OPEN_HOLD_SECONDS = float(
+        setting(settings, "game_actions.picker_open_hold_seconds", PICKER_OPEN_HOLD_SECONDS)
+    )
+    PICKER_END_RELEASE_GRACE_SECONDS = float(
+        setting(
+            settings,
+            "game_actions.picker_end_release_grace_seconds",
+            PICKER_END_RELEASE_GRACE_SECONDS,
+        )
+    )
+    RIGHT_ARROW_HOLD_SECONDS = float(
+        setting(settings, "game_actions.right_arrow_hold_seconds", RIGHT_ARROW_HOLD_SECONDS)
+    )
+    MARKET_ACTION_STAGE_MAX_AGE_SECONDS = float(
+        setting(
+            settings,
+            "game_actions.market_action_stage_max_age_seconds",
+            MARKET_ACTION_STAGE_MAX_AGE_SECONDS,
+        )
+    )
+    RIGHT_SHIFT_POLL_SECONDS = float(
+        setting(settings, "game_actions.right_shift_poll_seconds", RIGHT_SHIFT_POLL_SECONDS)
+    )
+
+    PASTE_BEFORE_CLICK_DELAY = float(setting(settings, "paste.before_click_delay", PASTE_BEFORE_CLICK_DELAY))
+    PASTE_HOVER_BEFORE_CLICK_DELAY = float(
+        setting(settings, "paste.hover_before_click_delay", PASTE_HOVER_BEFORE_CLICK_DELAY)
+    )
+    PASTE_AFTER_CLICK_DELAY = float(setting(settings, "paste.after_click_delay", PASTE_AFTER_CLICK_DELAY))
+    PASTE_AFTER_CLEAR_DELAY = float(setting(settings, "paste.after_clear_delay", PASTE_AFTER_CLEAR_DELAY))
+    PASTE_BETWEEN_KEYS_DELAY = float(setting(settings, "paste.between_keys_delay", PASTE_BETWEEN_KEYS_DELAY))
+    PASTE_BEFORE_ENTER_DELAY = float(setting(settings, "paste.before_enter_delay", PASTE_BEFORE_ENTER_DELAY))
+    PASTE_ENTER_KEY_DELAY = float(setting(settings, "paste.enter_key_delay", PASTE_ENTER_KEY_DELAY))
+    PASTE_SEARCH_CLICKS = int(setting(settings, "paste.search_clicks", PASTE_SEARCH_CLICKS))
+    MOUSE_CLICK_DELAY = float(setting(settings, "paste.mouse_click_delay", MOUSE_CLICK_DELAY))
+
+
+apply_settings()
 
 # Windows constants
 GWL_EXSTYLE = -20
@@ -183,6 +556,25 @@ VK_A = 0x41
 VK_V = 0x56
 VK_BACK = 0x08
 VK_RETURN = 0x0D
+VK_ESCAPE = 0x1B
+VK_NEXT = 0x22
+VK_END = 0x23
+VK_LEFT = 0x25
+VK_UP = 0x26
+VK_RIGHT = 0x27
+VK_DOWN = 0x28
+VK_RCONTROL = 0xA3
+VK_RSHIFT = 0xA1
+PICKER_UP_HOTKEY_ID = 7312
+PICKER_DOWN_HOTKEY_ID = 7313
+PICKER_RIGHT_HOTKEY_ID = 7314
+PICKER_LEFT_HOTKEY_ID = 7315
+PICKER_ACTION_HOTKEYS = (
+    (PICKER_UP_HOTKEY_ID, VK_UP, "picker_up"),
+    (PICKER_DOWN_HOTKEY_ID, VK_DOWN, "picker_down"),
+    (PICKER_RIGHT_HOTKEY_ID, VK_RIGHT, "picker_right"),
+    (PICKER_LEFT_HOTKEY_ID, VK_LEFT, "picker_left"),
+)
 
 
 class MONITORINFO(ctypes.Structure):
@@ -239,11 +631,14 @@ class MSG(ctypes.Structure):
 
 q = queue.Queue()
 hotkey_q = queue.Queue()
+hotkey_command_q = queue.Queue()
+hotkey_thread_id = None
+root = None
+canvas = None
+timer_text = None
 remaining_seconds = None
 timer_base_seconds = None
 timer_base_at = None
-blink_on = False
-last_blink_at = 0
 last_log_times = {}
 notch_items = []
 alert_strip = None
@@ -257,15 +652,51 @@ second_monitor_border_items = []
 second_monitor_rect = None
 picker_items = []
 picker_window = None
+picker_hwnd = None
 picker_canvas = None
 picker_canvas_window = None
 picker_inner = None
 picker_status = None
 picker_timer_label = None
+picker_status_label = None
 picker_target_hwnd = None
+picker_display_rows = []
+picker_total_content_height = 0
+picker_hover_row_index = None
+picker_selected_row_index = None
+picker_font_cache = {}
+picker_columns_cache = {}
 picker_last_refresh = 0
+picker_last_success_at = None
+picker_last_refresh_ms = None
+picker_last_item_count = 0
+picker_last_refresh_note = "кэш"
 picker_refresh_lock = threading.Lock()
+picker_fast_refresh_lock = threading.Lock()
+filters_cache_lock = threading.Lock()
+filters_cache = None
+filters_cache_at = 0
 picker_refreshing = False
+picker_navigation_hotkeys_registered = False
+picker_actions_enabled = False
+right_shift_order_down = False
+right_ctrl_was_down = False
+right_arrow_was_down = False
+right_arrow_press_at = 0
+right_arrow_hold_active = False
+right_arrow_hold_compensated = False
+right_arrow_last_action_stage = None
+picker_end_hold_pending = False
+picker_end_hold_consumed = False
+picker_end_press_active = False
+picker_end_press_was_open = False
+picker_end_hold_triggered = False
+picker_end_latched = False
+picker_end_press_at = 0
+market_action_stage = "open_card"
+market_action_stage_ready_at = 0
+market_action_stage_updated_at = 0
+picker_render_signature = None
 last_picker_paste_at = 0
 last_picker_paste_name = None
 last_alert_context_hwnd = None
@@ -277,19 +708,37 @@ notch_radius = BASE_NOTCH_RADIUS
 font_pixels = BASE_FONT_PIXELS
 
 
+def rotate_log_if_needed():
+    try:
+        if not LOG_PATH.exists() or LOG_PATH.stat().st_size <= LOG_MAX_BYTES:
+            return
+
+        old_log_path = LOG_PATH.with_name(f"{LOG_PATH.stem}.old{LOG_PATH.suffix}")
+        if old_log_path.exists():
+            old_log_path.unlink()
+        LOG_PATH.replace(old_log_path)
+    except Exception:
+        pass
+
+
+def append_log_line(message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        rotate_log_if_needed()
+        with LOG_PATH.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"[{timestamp}] {message}\n")
+    except Exception:
+        pass
+
+
 def log_error(key, message):
     now = time.monotonic()
     if now - last_log_times.get(key, 0) < 30:
         return
 
     last_log_times[key] = now
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    try:
-        with LOG_PATH.open("a", encoding="utf-8") as log_file:
-            log_file.write(f"[{timestamp}] {message}\n")
-    except Exception:
-        pass
+    append_log_line(message)
 
 
 def parse_local_storage_value(data, keys):
@@ -311,6 +760,140 @@ def parse_local_storage_value(data, keys):
             )
             if match:
                 best_value = match.group(1)
+
+            start = index + 1
+
+    return best_value
+
+
+def get_storage_text_tail(data, index, key_length, size=48):
+    tail = data[index + key_length : index + key_length + size]
+    return "".join(chr(byte) if 32 <= byte <= 126 else " " for byte in tail)
+
+
+def number_in_range(value, min_value=None, max_value=None):
+    if min_value is not None and value < min_value:
+        return False
+    if max_value is not None and value > max_value:
+        return False
+    return True
+
+
+def parse_number_from_storage_text(text, min_value=None, max_value=None, prefer="first"):
+    candidates = []
+    for match in re.finditer(r"-?\d+(?:\.\d+)?", text):
+        token = match.group(0)
+        prefixes = [token]
+        if max_value is not None and "." not in token:
+            trimmed = token
+            while len(trimmed) > 1:
+                trimmed = trimmed[:-1]
+                prefixes.append(trimmed)
+
+        for prefix in prefixes:
+            try:
+                value = float(prefix)
+            except Exception:
+                continue
+            if value.is_integer():
+                value = int(value)
+            if number_in_range(value, min_value, max_value):
+                candidates.append((match.start(), len(prefix), value))
+                break
+
+    if not candidates:
+        return None
+
+    if prefer == "longest":
+        _, _, value = max(candidates, key=lambda item: (item[1], -item[0]))
+    else:
+        _, _, value = min(candidates, key=lambda item: item[0])
+    return value
+
+
+def get_storage_text_range(data, start, end):
+    start = max(0, min(len(data), start))
+    end = max(start, min(len(data), end))
+    chunk = data[start:end]
+    return "".join(chr(byte) if 32 <= byte <= 126 else " " for byte in chunk)
+
+
+def parse_flash_filter_cluster(data):
+    result = {}
+    start = 0
+    anchor = b"anomalyMinBo"
+
+    while True:
+        anchor_index = data.find(anchor, start)
+        if anchor_index == -1:
+            break
+
+        cluster_end = min(len(data), anchor_index + 180)
+        profit_index = data.find(b"Profit", anchor_index, cluster_end)
+        window_index = data.find(b"TimeWindow", anchor_index, cluster_end)
+
+        if profit_index != -1 and window_index != -1:
+            min_requests_text = get_storage_text_range(
+                data,
+                anchor_index + len(anchor),
+                profit_index,
+            )
+            min_profit_text = get_storage_text_range(
+                data,
+                profit_index + len(b"Profit"),
+                window_index,
+            )
+            time_window_text = get_storage_text_range(
+                data,
+                window_index + len(b"TimeWindow"),
+                min(len(data), window_index + len(b"TimeWindow") + 48),
+            )
+
+            parsed = {
+                "flash_min_requests": parse_number_from_storage_text(
+                    min_requests_text,
+                    min_value=0,
+                    prefer="first",
+                ),
+                "flash_min_profit": parse_number_from_storage_text(
+                    min_profit_text,
+                    min_value=0,
+                    prefer="longest",
+                ),
+                "flash_time_window": parse_number_from_storage_text(
+                    time_window_text,
+                    min_value=15,
+                    max_value=240,
+                    prefer="longest",
+                ),
+            }
+            result.update({key: value for key, value in parsed.items() if value is not None})
+
+        start = anchor_index + len(anchor)
+
+    return result
+
+
+def parse_local_storage_number(data, keys, min_value=None, max_value=None, prefer="first"):
+    best_value = None
+
+    for key in keys:
+        start = 0
+        key_bytes = key.encode("utf-8")
+        while True:
+            index = data.find(key_bytes, start)
+            if index == -1:
+                break
+
+            text = get_storage_text_tail(data, index, len(key_bytes))
+            parsed = parse_number_from_storage_text(
+                text,
+                min_value=min_value,
+                max_value=max_value,
+                prefer=prefer,
+            )
+            if parsed is not None:
+                best_value = parsed
 
             start = index + 1
 
@@ -364,6 +947,7 @@ def read_crossoutcore_filters():
         "recycling_sell_mode": "s",
         "recycling_show_only_sale_lots": True,
     }
+    flash_cluster_filters = {}
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
         return filters
@@ -371,21 +955,6 @@ def read_crossoutcore_filters():
     chrome_user_data_path = Path(local_app_data) / "Google" / "Chrome" / "User Data"
     if not chrome_user_data_path.exists():
         return filters
-
-    keys = {
-        "flash_min_profit": ("anomalyMinProfit", "Profit"),
-        "flash_min_requests": ("anomalyMinBo", "MinBo"),
-        "flash_time_window": ("anomalyTimeWindow", "TimeWindow"),
-        "flash_min_buyer_ratio": ("anomalyMinBuyerRatio", "BuyerRatio", "uyerRatio"),
-        "recycling_rarities": ("Recycling-rarities", "rarities"),
-        "recycling_buy_mode": ("Recycling-buy-mode", "buy-mode"),
-        "recycling_sell_mode": ("Recycling-sell-mode", "sell-mode"),
-        "recycling_show_only_sale_lots": (
-            "Recycling-show-only-with-sale-lots",
-            "show-only-with-sale-lots",
-            "how-only-with-sale-lots",
-        ),
-    }
 
     try:
         leveldb_paths = [
@@ -412,14 +981,30 @@ def read_crossoutcore_filters():
             continue
 
         if b"crossoutcore.ru" not in data and not any(
-            key.encode("utf-8") in data for variants in keys.values() for key in variants
+            key.encode("utf-8") in data
+            for variants in FILTER_STORAGE_KEYS.values()
+            for key in variants
         ):
             continue
 
-        for name, variants in keys.items():
-            parsed = coerce_storage_value(parse_local_storage_value(data, variants))
+        for name, variants in FILTER_STORAGE_KEYS.items():
+            if name in FILTER_NUMERIC_SPECS:
+                spec = FILTER_NUMERIC_SPECS[name]
+                parsed = parse_local_storage_number(
+                    data,
+                    variants,
+                    min_value=spec["min"],
+                    max_value=spec["max"],
+                    prefer=spec["prefer"],
+                )
+            else:
+                parsed = coerce_storage_value(parse_local_storage_value(data, variants))
             if parsed is not None:
                 filters[name] = parsed
+
+        flash_cluster_filters.update(parse_flash_filter_cluster(data))
+
+    filters.update(flash_cluster_filters)
 
     filters["flash_time_window"] = normalize_filter_number(
         filters["flash_time_window"],
@@ -427,6 +1012,10 @@ def read_crossoutcore_filters():
         15,
         240,
     )
+    # Сайт показывает таблицу "Продажа (60 мин)"; в Chrome LevelDB рядом с этим
+    # ключом иногда читается служебное число 50, из-за чего список становится
+    # короче сайта. Держим период ровно как у видимой таблицы.
+    filters["flash_time_window"] = FLASH_ANALYSIS_MINUTES
     filters["flash_min_profit"] = normalize_filter_number(
         filters["flash_min_profit"],
         FLASH_MIN_PROFIT,
@@ -443,6 +1032,7 @@ def read_crossoutcore_filters():
         0,
         100,
     )
+    filters["flash_min_buyer_ratio"] = 0
     if filters["recycling_buy_mode"] not in ("s", "b"):
         filters["recycling_buy_mode"] = "s"
     if filters["recycling_sell_mode"] not in ("s", "b"):
@@ -459,6 +1049,32 @@ def read_crossoutcore_filters():
             if normalized_rarity not in normalized_rarities:
                 normalized_rarities.append(normalized_rarity)
         filters["recycling_rarities"] = normalized_rarities
+
+    return filters
+
+
+def clone_filters(filters):
+    cloned = dict(filters)
+    cloned["recycling_rarities"] = list(filters.get("recycling_rarities") or [])
+    return cloned
+
+
+def read_crossoutcore_filters_cached(force=False):
+    global filters_cache, filters_cache_at
+
+    now = time.monotonic()
+    with filters_cache_lock:
+        if (
+            not force
+            and filters_cache is not None
+            and now - filters_cache_at <= FILTERS_CACHE_SECONDS
+        ):
+            return clone_filters(filters_cache)
+
+    filters = read_crossoutcore_filters()
+    with filters_cache_lock:
+        filters_cache = clone_filters(filters)
+        filters_cache_at = now
 
     return filters
 
@@ -501,6 +1117,31 @@ def format_seconds(seconds):
     return f"{minutes}:{whole_seconds:02d}"
 
 
+def format_age(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}с"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}м"
+    return f"{minutes // 60}ч"
+
+
+def get_picker_status_text():
+    if not PICKER_SHOW_STATUS:
+        return ""
+
+    if picker_refreshing:
+        return "обновляю..."
+
+    if picker_last_success_at is None:
+        return picker_last_refresh_note
+
+    age = format_age(time.monotonic() - picker_last_success_at)
+    timing = f"{int(picker_last_refresh_ms)}мс" if picker_last_refresh_ms is not None else "--"
+    return f"{picker_last_item_count} · {age} · {timing}"
+
+
 def update_picker_timer_label():
     if picker_timer_label is None:
         return
@@ -511,15 +1152,14 @@ def update_picker_timer_label():
         text = f"До обновления: {format_seconds(remaining_seconds)}"
 
     picker_timer_label.configure(text=text)
+    if picker_status_label is not None:
+        picker_status_label.configure(text=get_picker_status_text())
 
 
 def fetch_target_update():
     request = urllib.request.Request(
         URL,
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Accept-Encoding": "identity",
-        },
+        headers=HTTP_HEADERS,
     )
 
     with urllib.request.urlopen(request, timeout=10) as response:
@@ -539,10 +1179,7 @@ def fetch_target_update():
 def fetch_page_html(url):
     request = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "Mozilla/5.0",
-            "Accept-Encoding": "identity",
-        },
+        headers=HTTP_HEADERS,
     )
 
     with urllib.request.urlopen(request, timeout=15) as response:
@@ -553,7 +1190,7 @@ def parse_next_action_response(text):
     for line in text.splitlines():
         if line.startswith("1:"):
             payload = line[2:]
-            payload = re.sub(r'"\$D([^"]+)"', r'"\1"', payload)
+            payload = NEXT_ACTION_DATE_RE.sub(r'"\1"', payload)
             return json.loads(payload)
 
     raise ValueError("Next action payload was not found")
@@ -596,19 +1233,8 @@ def decode_json_string(value):
 def parse_crossout_data(page_html):
     items = {}
     market_data = {}
-    item_pattern = re.compile(
-        r'\{\\"id\\":(\d+),\\"name\\":\\"(.*?)\\",\\"rarityId\\":'
-        r'(null|\d+),\\"factionId\\":(null|\d+),\\"categoryId\\":'
-        r'(null|\d+),\\"typeId\\":(null|\d+).*?\\"removed\\":(\d+),'
-        r'\\"amount\\":(\d+),\\"craftable\\":(\d+)',
-        re.DOTALL,
-    )
-    market_pattern = re.compile(
-        r'\\"(\d+)\\":\{\\"s\\":([0-9.]+),\\"b\\":([0-9.]+),'
-        r'\\"so\\":(\d+),\\"bo\\":(\d+),[^}]*?\\"t\\":(\d+)\}'
-    )
 
-    for match in item_pattern.finditer(page_html):
+    for match in ITEM_PATTERN.finditer(page_html):
         item_id = int(match.group(1))
         rarity_id = None if match.group(3) == "null" else int(match.group(3))
         faction_id = None if match.group(4) == "null" else int(match.group(4))
@@ -631,7 +1257,7 @@ def parse_crossout_data(page_html):
             "craftable": craftable,
         }
 
-    for match in market_pattern.finditer(page_html):
+    for match in MARKET_PATTERN.finditer(page_html):
         item_id = int(match.group(1))
         market_data[item_id] = {
             "sell": float(match.group(2)),
@@ -714,7 +1340,7 @@ def build_flash_items(items_by_id, market_data, market_minutes, filters):
     return sorted(flash_candidates, key=lambda item: item["score"], reverse=True)
 
 
-def build_recycling_items(items_by_id, market_data, excluded_ids, filters):
+def build_recycling_items(items_by_id, market_data, filters):
     # Берем те же режимы цен, что сохранены сайтом для /recycling/.
     # Сортируем именно по монетам прибыли, а не по ROI.
     if RECYCLING_FORCE_INSTANT_PROFIT_PRICES:
@@ -738,8 +1364,7 @@ def build_recycling_items(items_by_id, market_data, excluded_ids, filters):
     for item in items_by_id.values():
         item_id = item["id"]
         if (
-            item_id in excluded_ids
-            or item["category_id"] not in PICKER_DECOR_CATEGORIES
+            item["category_id"] not in PICKER_DECOR_CATEGORIES
             or item.get("removed")
             or item.get("amount", 0) <= 0
             or (selected_rarities and item.get("rarity_id") not in selected_rarities)
@@ -837,38 +1462,145 @@ def build_recycling_sale_prices(market_data, selected_rarities=None):
     return prices
 
 
-def build_picker_items():
-    flash_html = fetch_page_html(FLASH_URL)
-    items_by_id, market_data = parse_crossout_data(flash_html)
+def has_real_picker_items(items):
+    return any(
+        isinstance(item, dict)
+        and not item.get("separator")
+        and not item.get("decor_prices")
+        for item in items or []
+    )
 
-    if not items_by_id:
-        raise ValueError("No Crossout items parsed")
+
+def timed_call(label, timings, func, *args):
+    started = time.perf_counter()
+    try:
+        return func(*args)
+    finally:
+        timings[label] = (time.perf_counter() - started) * 1000
+
+
+def fetch_picker_sources():
+    timings = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        flash_future = executor.submit(timed_call, "flash_fetch_ms", timings, fetch_page_html, FLASH_URL)
+        recycling_future = executor.submit(
+            timed_call,
+            "recycling_fetch_ms",
+            timings,
+            fetch_page_html,
+            RECYCLING_URL,
+        )
+        market_minutes_future = executor.submit(
+            timed_call,
+            "minutes_fetch_ms",
+            timings,
+            fetch_market_minutes,
+        )
+
+        filters_started = time.perf_counter()
+        filters = read_crossoutcore_filters_cached()
+        timings["filters_ms"] = (time.perf_counter() - filters_started) * 1000
+        flash_html = flash_future.result()
+
+        try:
+            recycling_html = recycling_future.result()
+        except Exception as e:
+            log_error("picker_recycling_fetch", f"Recycling page fetch failed: {e}")
+            recycling_html = None
+
+        try:
+            market_minutes = market_minutes_future.result()
+        except Exception as e:
+            log_error("picker_market_minutes_fetch", f"Market minutes fetch failed: {e}")
+            market_minutes = {}
+
+    return filters, flash_html, recycling_html, market_minutes, timings
+
+
+def parse_market_source(source_name, html):
+    items_by_id, market_data = parse_crossout_data(html)
+    if not items_by_id or not market_data:
+        raise ValueError(f"No {source_name} data parsed")
+    return items_by_id, market_data
+
+
+def merge_market_sources(primary_items, primary_market, secondary_items, secondary_market):
+    merged_items = dict(primary_items)
+    merged_items.update(secondary_items)
+
+    merged_market = dict(primary_market)
+    merged_market.update(secondary_market)
+
+    return merged_items, merged_market
+
+
+def count_real_picker_items(items):
+    return sum(
+        1
+        for item in items or []
+        if isinstance(item, dict)
+        and not item.get("separator")
+        and not item.get("decor_prices")
+    )
+
+
+def log_picker_performance(timings, result):
+    if not PICKER_PROFILE_REFRESH:
+        return
+
+    parts = [
+        f"total={timings.get('total_ms', 0):.0f}ms",
+        f"flash={timings.get('flash_fetch_ms', 0):.0f}ms",
+        f"recycling={timings.get('recycling_fetch_ms', 0):.0f}ms",
+        f"minutes={timings.get('minutes_fetch_ms', 0):.0f}ms",
+        f"filters={timings.get('filters_ms', 0):.0f}ms",
+        f"build={timings.get('build_ms', 0):.0f}ms",
+        f"items={count_real_picker_items(result)}",
+    ]
+    append_log_line("picker_refresh " + " ".join(parts))
+
+
+def build_picker_items():
+    build_started = time.perf_counter()
+    filters, flash_html, recycling_html, market_minutes, timings = fetch_picker_sources()
+    parse_started = time.perf_counter()
+    items_by_id, market_data = parse_market_source("flash", flash_html)
+    timings["parse_flash_ms"] = (time.perf_counter() - parse_started) * 1000
 
     try:
-        recycling_html = fetch_page_html(RECYCLING_URL)
-        recycling_items_by_id, recycling_market_data = parse_crossout_data(recycling_html)
-        if not recycling_items_by_id or not recycling_market_data:
-            raise ValueError("No recycling data parsed")
+        if recycling_html is None:
+            raise ValueError("Recycling page was not fetched")
+        parse_started = time.perf_counter()
+        recycling_items_by_id, recycling_market_data = parse_market_source(
+            "recycling",
+            recycling_html,
+        )
+        timings["parse_recycling_ms"] = (time.perf_counter() - parse_started) * 1000
     except Exception as e:
-        log_error("picker_recycling_fetch", f"Recycling page fetch failed: {e}")
+        log_error("picker_recycling_parse", f"Recycling page parse failed: {e}")
         recycling_items_by_id = items_by_id
         recycling_market_data = market_data
 
-    filters = read_crossoutcore_filters()
-    market_minutes = fetch_market_minutes()
-    flash_items = build_flash_items(items_by_id, market_data, market_minutes, filters)
-    flash_item_ids = {item["id"] for item in flash_items}
-    decor_items = build_recycling_items(
+    merged_recycling_items_by_id, merged_recycling_market_data = merge_market_sources(
+        items_by_id,
+        market_data,
         recycling_items_by_id,
         recycling_market_data,
-        flash_item_ids,
+    )
+
+    items_started = time.perf_counter()
+    flash_items = build_flash_items(items_by_id, market_data, market_minutes, filters)
+    decor_items = build_recycling_items(
+        merged_recycling_items_by_id,
+        merged_recycling_market_data,
         filters,
     )
 
     decor_sale_prices = build_recycling_sale_prices(
-        recycling_market_data,
+        merged_recycling_market_data,
         filters["recycling_rarities"],
     )
+    timings["build_ms"] = (time.perf_counter() - items_started) * 1000
 
     result = (
         flash_items
@@ -876,14 +1608,36 @@ def build_picker_items():
         + ([{"decor_prices": True, "prices": decor_sale_prices}] if decor_items else [])
         + decor_items
     )
-    if not any(not item.get("separator") for item in result):
-        return [{"separator": True, "section": "Предметы не найдены"}]
+    if not has_real_picker_items(result):
+        result = [{"separator": True, "section": "Предметы не найдены"}]
 
-    return result
+    timings["total_ms"] = (time.perf_counter() - build_started) * 1000
+    log_picker_performance(timings, result)
+    return result, timings
+
+
+def build_picker_items_with_retries():
+    last_items = []
+    last_timings = {}
+    attempts = max(1, PICKER_EMPTY_RETRY_ATTEMPTS)
+
+    for attempt in range(attempts):
+        items, timings = build_picker_items()
+        last_items = items
+        last_timings = timings
+        if has_real_picker_items(items):
+            return items, timings, None
+
+        if attempt + 1 < attempts:
+            time.sleep(PICKER_EMPTY_RETRY_DELAY_SECONDS)
+
+    return last_items, last_timings, "empty"
 
 
 def refresh_picker_items(force=False):
     global picker_items, picker_last_refresh, picker_refreshing
+    global picker_last_success_at, picker_last_refresh_ms, picker_last_item_count
+    global picker_last_refresh_note
 
     now = time.monotonic()
     if not force and picker_items and now - picker_last_refresh < PICKER_REFRESH_SECONDS:
@@ -893,22 +1647,39 @@ def refresh_picker_items(force=False):
         return
 
     picker_refreshing = True
+    if root is not None:
+        root.after(0, update_picker_timer_label)
     try:
-        fresh_items = build_picker_items()
+        fresh_items, timings, warning = build_picker_items_with_retries()
+        if warning and has_real_picker_items(picker_items):
+            picker_last_refresh_note = "сайт пусто"
+            return
+
         picker_items = fresh_items
         picker_last_refresh = now
-        save_picker_cache()
+        picker_last_refresh_ms = timings.get("total_ms")
+        picker_last_item_count = count_real_picker_items(fresh_items)
+        if has_real_picker_items(fresh_items):
+            picker_last_success_at = time.monotonic()
+            picker_last_refresh_note = "свежие"
+            save_picker_cache()
+        else:
+            picker_last_refresh_note = "нет данных"
     except Exception as e:
         log_error("picker_fetch", f"Picker item fetch failed: {e}")
-        if not picker_items:
+        picker_last_refresh_note = "ошибка"
+        if not has_real_picker_items(picker_items):
             picker_items = [{"separator": True, "section": "Не удалось загрузить предметы"}]
     finally:
         picker_refreshing = False
+        if root is not None:
+            root.after(0, update_picker_timer_label)
         picker_refresh_lock.release()
 
 
 def load_picker_cache():
-    global picker_items, picker_last_refresh
+    global picker_items, picker_last_refresh, picker_last_success_at, picker_last_item_count
+    global picker_last_refresh_note
 
     try:
         with PICKER_CACHE_PATH.open("r", encoding="utf-8") as cache_file:
@@ -921,10 +1692,10 @@ def load_picker_cache():
         return
     if data.get("version") != PICKER_CACHE_VERSION:
         return
+    if not has_real_picker_items(items):
+        return
 
-    # Старый кэш может показывать декор, который уже перестал быть прибыльным.
-    # Поэтому не используем кэш старше PICKER_CACHE_MAX_AGE_SECONDS.
-    age_seconds = PICKER_CACHE_MAX_AGE_SECONDS + 1
+    age_seconds = 0
     saved_at = data.get("saved_at")
     if isinstance(saved_at, str):
         try:
@@ -933,16 +1704,17 @@ def load_picker_cache():
         except Exception:
             pass
 
-    if age_seconds > PICKER_CACHE_MAX_AGE_SECONDS:
-        picker_items = []
-        picker_last_refresh = 0
-        return
-
     picker_items = items
     picker_last_refresh = time.monotonic() - age_seconds
+    picker_last_success_at = time.monotonic() - age_seconds
+    picker_last_item_count = count_real_picker_items(items)
+    picker_last_refresh_note = "кэш"
 
 
 def save_picker_cache():
+    if not has_real_picker_items(picker_items):
+        return
+
     try:
         with PICKER_CACHE_PATH.open("w", encoding="utf-8") as cache_file:
             json.dump(
@@ -959,7 +1731,7 @@ def save_picker_cache():
 
 
 def repaint_picker_if_visible():
-    if picker_window is not None and picker_window.state() != "withdrawn":
+    if picker_window is not None:
         populate_picker()
 
 
@@ -972,6 +1744,23 @@ def picker_refresh_worker():
     while True:
         refresh_picker_and_repaint(force=True)
         time.sleep(PICKER_BACKGROUND_REFRESH_SECONDS)
+
+
+def picker_fast_refresh_worker():
+    if not picker_fast_refresh_lock.acquire(blocking=False):
+        return
+
+    try:
+        for attempt in range(PICKER_FAST_REFRESH_ATTEMPTS):
+            refresh_picker_and_repaint(force=True)
+            if attempt + 1 < PICKER_FAST_REFRESH_ATTEMPTS:
+                time.sleep(PICKER_FAST_REFRESH_DELAY_SECONDS)
+    finally:
+        picker_fast_refresh_lock.release()
+
+
+def trigger_picker_fast_refresh():
+    threading.Thread(target=picker_fast_refresh_worker, daemon=True).start()
 
 
 def timer_worker():
@@ -1002,6 +1791,7 @@ def timer_worker():
         q.put((format_seconds(seconds_left), seconds_left))
 
         if seconds_left <= ALERT_END_SECONDS:
+            trigger_picker_fast_refresh()
             target_delta_ms = None
             time.sleep(1)
         else:
@@ -1021,7 +1811,8 @@ def update_label():
             display_value, seconds_left = parse_timer(value)
             timer_base_seconds = seconds_left
             timer_base_at = None
-            canvas.itemconfig(timer_text, text=display_value)
+            if SHOW_NOTCH_OVERLAY and canvas is not None and timer_text is not None:
+                canvas.itemconfig(timer_text, text=display_value)
 
     if timer_base_seconds is not None:
         if timer_base_at is None:
@@ -1032,7 +1823,8 @@ def update_label():
             smooth_seconds = timer_base_seconds - (time.monotonic() - timer_base_at)
 
         remaining_seconds = smooth_seconds
-        canvas.itemconfig(timer_text, text=format_seconds(smooth_seconds))
+        if SHOW_NOTCH_OVERLAY and canvas is not None and timer_text is not None:
+            canvas.itemconfig(timer_text, text=format_seconds(smooth_seconds))
 
     update_colors()
     update_picker_timer_label()
@@ -1041,7 +1833,11 @@ def update_label():
 
 
 def update_colors():
+    foreground_hwnd = get_foreground_hwnd()
+    game_foreground = is_game_window(foreground_hwnd)
+
     if not is_alert_window(remaining_seconds):
+        set_notch_visible(False)
         set_alert_visible(False)
         set_primary_monitor_alert(False)
         set_second_monitor_alert(False)
@@ -1049,56 +1845,89 @@ def update_colors():
 
     pulse = get_alert_pulse()
     if pulse <= 0:
+        set_notch_visible(False)
         set_alert_visible(False)
         set_primary_monitor_alert(False)
         set_second_monitor_alert(False)
         return
 
-    context_hwnd = get_alert_context_hwnd()
-    game_active = is_game_window(context_hwnd)
-    primary_active = is_window_on_primary_monitor(context_hwnd)
+    primary_active = is_window_on_primary_monitor(foreground_hwnd)
 
-    if game_active:
+    if game_foreground:
+        set_notch_visible(False)
         set_alert_visible(False)
         set_primary_monitor_alert(False)
         set_second_monitor_alert(True, pulse)
     elif TEST_MODE or primary_active:
-        set_alert_visible(True, pulse)
+        set_notch_visible(False)
+        set_alert_visible(False)
         set_primary_monitor_alert(True, pulse)
         set_second_monitor_alert(False)
     else:
+        set_notch_visible(False)
         set_alert_visible(False)
         set_primary_monitor_alert(False)
         set_second_monitor_alert(False)
 
 
 def get_alert_pulse():
-    cycle = ALERT_FADE_IN_SECONDS + ALERT_FADE_OUT_SECONDS + ALERT_OFF_GAP_SECONDS
+    cycle = sum(duration for _, duration, _ in ALERT_PULSE_PATTERN)
     position = time.monotonic() % cycle
 
-    if position < ALERT_FADE_IN_SECONDS:
-        progress = position / ALERT_FADE_IN_SECONDS
-        return progress * progress * (3 - 2 * progress)
+    for mode, duration, peak in ALERT_PULSE_PATTERN:
+        if position < duration:
+            if duration <= 0:
+                return peak
 
-    position -= ALERT_FADE_IN_SECONDS
-    if position < ALERT_FADE_OUT_SECONDS:
-        progress = position / ALERT_FADE_OUT_SECONDS
-        eased = progress * progress * (3 - 2 * progress)
-        return 1 - eased
+            progress = position / duration
+            eased = progress * progress * (3 - 2 * progress)
+            if mode == "rise":
+                return peak * eased
+            if mode == "fall":
+                return peak * (1 - eased)
+            return peak
+
+        position -= duration
 
     return 0
 
 
+def get_pulse_alpha(min_alpha, max_alpha, pulse):
+    pulse = max(0, min(1, pulse))
+    return min_alpha + (max_alpha - min_alpha) * pulse
+
+
 def set_notch_colors(bg, fg, alpha):
+    if not SHOW_NOTCH_OVERLAY or canvas is None or timer_text is None:
+        return
+
     root.attributes("-alpha", alpha)
     for item in notch_items:
         canvas.itemconfig(item, fill=bg)
     canvas.itemconfig(timer_text, fill=fg)
 
 
-def set_alert_visible(is_visible, pulse=0):
+def set_notch_visible(is_visible):
+    if not SHOW_NOTCH_OVERLAY:
+        if root.state() != "withdrawn":
+            root.withdraw()
+        return
+
     if is_visible:
-        root.attributes("-alpha", ALERT_ALPHA)
+        if root.state() == "withdrawn":
+            show_overlay()
+    elif root.state() != "withdrawn":
+        root.withdraw()
+
+
+def set_alert_visible(is_visible, pulse=0):
+    if not SHOW_NOTCH_OVERLAY or canvas is None or alert_strip is None or timer_text is None:
+        if root.state() != "withdrawn":
+            root.withdraw()
+        return
+
+    if is_visible:
+        root.attributes("-alpha", get_pulse_alpha(ALERT_MIN_ALPHA, ALERT_ALPHA, pulse))
         canvas.itemconfig(alert_strip, state="normal", fill=ALERT_BG)
         for item in notch_items:
             canvas.itemconfig(item, fill=ALERT_BG)
@@ -1117,7 +1946,10 @@ def set_primary_monitor_alert(is_visible, pulse=0):
 
     if is_visible:
         primary_monitor_alert.attributes("-topmost", True)
-        primary_monitor_alert.attributes("-alpha", PRIMARY_MONITOR_ALPHA)
+        primary_monitor_alert.attributes(
+            "-alpha",
+            get_pulse_alpha(PRIMARY_MONITOR_MIN_ALPHA, PRIMARY_MONITOR_ALPHA, pulse),
+        )
         try:
             apply_no_focus_clickthrough(primary_monitor_alert)
         except Exception:
@@ -1132,7 +1964,10 @@ def set_second_monitor_alert(is_visible, pulse=0):
         return
 
     if is_visible:
-        second_monitor_alert.attributes("-alpha", SECOND_MONITOR_ALPHA)
+        second_monitor_alert.attributes(
+            "-alpha",
+            get_pulse_alpha(SECOND_MONITOR_MIN_ALPHA, SECOND_MONITOR_ALPHA, pulse),
+        )
         try:
             apply_no_focus_clickthrough(second_monitor_alert)
         except Exception:
@@ -1175,7 +2010,25 @@ def is_own_overlay_hwnd(hwnd):
 
 
 def is_picker_open():
-    return picker_window is not None and picker_window.state() != "withdrawn"
+    if picker_window is None:
+        return False
+
+    try:
+        if picker_window.state() == "withdrawn":
+            return False
+        return is_picker_window_visible_fast()
+    except Exception:
+        return False
+
+
+def is_picker_window_visible_fast():
+    if not picker_hwnd:
+        return False
+
+    try:
+        return bool(ctypes.windll.user32.IsWindowVisible(picker_hwnd))
+    except Exception:
+        return False
 
 
 def get_alert_context_hwnd():
@@ -1235,13 +2088,56 @@ def get_window_info(hwnd):
         return ""
 
 
+def get_window_process_path(hwnd):
+    try:
+        if not hwnd:
+            return ""
+
+        pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+
+        if not pid.value:
+            return ""
+
+        process = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION,
+            False,
+            pid.value,
+        )
+        if not process:
+            return ""
+
+        try:
+            path_size = wintypes.DWORD(32768)
+            path_buffer = ctypes.create_unicode_buffer(path_size.value)
+            if ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                process,
+                0,
+                path_buffer,
+                ctypes.byref(path_size),
+            ):
+                return path_buffer.value.lower()
+        finally:
+            ctypes.windll.kernel32.CloseHandle(process)
+
+    except Exception:
+        return ""
+
+    return ""
+
+
 def get_foreground_window_info():
     return get_window_info(get_foreground_hwnd())
 
 
 def is_game_window(hwnd):
-    window_info = get_window_info(hwnd)
-    return any(keyword in window_info for keyword in GAME_WINDOW_KEYWORDS)
+    process_path = get_window_process_path(hwnd)
+    if not process_path:
+        return False
+
+    process_name = Path(process_path).name.lower()
+    process_info = f"{process_name} {process_path}"
+    return any(keyword in process_info for keyword in GAME_WINDOW_KEYWORDS)
 
 
 def is_game_foreground():
@@ -1451,13 +2347,319 @@ def click_game_search_field(hwnd, clicks=1):
     user32.SetCursorPos(x, y)
     return clicked
 
-def _log_direct(message):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def get_picker_action_hwnd():
+    foreground_hwnd = get_foreground_hwnd()
+    if foreground_hwnd and is_game_window(foreground_hwnd):
+        return foreground_hwnd
+
+    return 0
+
+
+def get_hwnd_ratio_point(hwnd, x_ratio, y_ratio):
+    rect = get_hwnd_rect(hwnd)
+    if rect is None:
+        return None
+
+    left, top, right, bottom = rect
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    return left + round(width * x_ratio), top + round(height * y_ratio)
+
+
+def get_screen_pixel_rgb(x, y):
+    hdc = ctypes.windll.user32.GetDC(0)
+    if not hdc:
+        return None
+
     try:
-        with LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(f"[{timestamp}] {message}\n")
-    except Exception:
-        pass
+        color = ctypes.windll.gdi32.GetPixel(hdc, int(x), int(y))
+        if color == -1:
+            return None
+        return color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF
+    finally:
+        ctypes.windll.user32.ReleaseDC(0, hdc)
+
+
+def get_hwnd_pixel_rgb(hwnd, x, y):
+    rect = get_hwnd_rect(hwnd)
+    if rect is None:
+        return None
+
+    left, top, _right, _bottom = rect
+    hdc = ctypes.windll.user32.GetDC(hwnd)
+    if not hdc:
+        return None
+
+    try:
+        color = ctypes.windll.gdi32.GetPixel(hdc, int(x - left), int(y - top))
+        if color == -1:
+            return None
+        return color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF
+    finally:
+        ctypes.windll.user32.ReleaseDC(hwnd, hdc)
+
+
+def is_orange_button_pixel(rgb):
+    if rgb is None:
+        return False
+
+    r, g, b = rgb
+    return (
+        r >= GAME_BUTTON_ORANGE_MIN_R
+        and g >= GAME_BUTTON_ORANGE_MIN_G
+        and b <= GAME_BUTTON_ORANGE_MAX_B
+        and r > g + GAME_BUTTON_ORANGE_MIN_RG_DIFF
+        and r > b + 50
+    )
+
+
+def count_orange_button_samples(x_ratio, y_ratio):
+    hwnd = get_picker_action_hwnd()
+    if not hwnd:
+        return 0
+
+    point = get_hwnd_ratio_point(hwnd, x_ratio, y_ratio)
+    if point is None:
+        return 0
+
+    hits = 0
+    base_x, base_y = point
+    for offset_x, offset_y in GAME_BUTTON_SAMPLE_OFFSETS:
+        x = base_x + offset_x
+        y = base_y + offset_y
+        rgb = get_hwnd_pixel_rgb(hwnd, x, y)
+        if rgb is None or not is_orange_button_pixel(rgb):
+            rgb = get_screen_pixel_rgb(x, y)
+        if is_orange_button_pixel(rgb):
+            hits += 1
+            if hits >= GAME_BUTTON_SAMPLE_REQUIRED_HITS:
+                break
+    return hits
+
+
+def is_game_button_visible(x_ratio, y_ratio):
+    return count_orange_button_samples(x_ratio, y_ratio) >= GAME_BUTTON_SAMPLE_REQUIRED_HITS
+
+
+def detect_market_action_stage():
+    if is_game_button_visible(GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO):
+        return "quantity"
+    if is_game_button_visible(GAME_BUY_BUTTON_X_RATIO, GAME_BUY_BUTTON_Y_RATIO):
+        return "buy"
+    return None
+
+
+def move_cursor_to_game_ratio(x_ratio, y_ratio):
+    hwnd = get_picker_action_hwnd()
+    if not hwnd:
+        return False
+
+    point = get_hwnd_ratio_point(hwnd, x_ratio, y_ratio)
+    if point is None:
+        return False
+
+    ctypes.windll.user32.SetCursorPos(point[0], point[1])
+    time.sleep(PASTE_HOVER_BEFORE_CLICK_DELAY)
+    return True
+
+
+def click_game_ratio(x_ratio, y_ratio):
+    if not move_cursor_to_game_ratio(x_ratio, y_ratio):
+        return False
+    return send_mouse_click()
+
+
+def open_selected_market_card():
+    return click_game_ratio(GAME_OPEN_CARD_X_RATIO, GAME_OPEN_CARD_Y_RATIO)
+
+
+def go_back_from_market_card():
+    hwnd = get_picker_action_hwnd()
+    if not hwnd:
+        return False
+    tap_key_scancode(VK_ESCAPE, delay=0.010)
+    return True
+
+
+def buy_current_market_item():
+    return click_game_ratio(GAME_BUY_BUTTON_X_RATIO, GAME_BUY_BUTTON_Y_RATIO)
+
+
+def increase_market_item_quantity():
+    return click_game_ratio(GAME_QUANTITY_PLUS_X_RATIO, GAME_QUANTITY_PLUS_Y_RATIO)
+
+
+def decrease_market_item_quantity():
+    return click_game_ratio(GAME_QUANTITY_MINUS_X_RATIO, GAME_QUANTITY_MINUS_Y_RATIO)
+
+
+def open_game_market_details():
+    clicked_market = click_game_ratio(GAME_MARKET_TAB_X_RATIO, GAME_MARKET_TAB_Y_RATIO)
+    time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
+    clicked_details = click_game_ratio(GAME_DETAILS_TAB_X_RATIO, GAME_DETAILS_TAB_Y_RATIO)
+    if clicked_market or clicked_details:
+        reset_market_action_stage()
+    return clicked_market and clicked_details
+
+
+def set_market_action_stage(stage, ready_at=0):
+    global market_action_stage, market_action_stage_ready_at, market_action_stage_updated_at
+
+    market_action_stage = stage
+    market_action_stage_ready_at = ready_at
+    market_action_stage_updated_at = time.monotonic()
+
+
+def reset_market_action_stage():
+    set_market_action_stage("open_card", 0)
+
+
+def get_market_action_stage():
+    global market_action_stage, market_action_stage_ready_at
+
+    now = time.monotonic()
+    if (
+        market_action_stage != "open_card"
+        and market_action_stage_updated_at
+        and now - market_action_stage_updated_at > MARKET_ACTION_STAGE_MAX_AGE_SECONDS
+    ):
+        reset_market_action_stage()
+        return market_action_stage
+
+    if market_action_stage == "opening_card" and now >= market_action_stage_ready_at:
+        set_market_action_stage("buy", 0)
+    elif market_action_stage == "opening_buy_dialog" and now >= market_action_stage_ready_at:
+        set_market_action_stage("quantity", 0)
+
+    return market_action_stage
+
+
+def handle_market_action_right():
+    global right_arrow_last_action_stage
+
+    detected_stage = detect_market_action_stage()
+    stage = detected_stage or get_market_action_stage()
+    now = time.monotonic()
+    right_arrow_last_action_stage = stage
+
+    if stage == "quantity":
+        set_market_action_stage("quantity", 0)
+        return increase_market_item_quantity()
+
+    if stage == "buy":
+        ok = buy_current_market_item()
+        if ok:
+            set_market_action_stage("opening_buy_dialog", now + GAME_BUY_TO_QUANTITY_DELAY_SECONDS)
+        return ok
+
+    if stage == "opening_buy_dialog":
+        return False
+
+    ok = open_selected_market_card()
+    if ok and market_action_stage != "opening_card":
+        set_market_action_stage("opening_card", now + GAME_OPEN_TO_BUY_DELAY_SECONDS)
+    return ok
+
+
+def handle_market_action_left():
+    reset_market_action_stage()
+    return go_back_from_market_card()
+
+
+def resolve_picker_end_hold():
+    global picker_end_hold_pending, picker_end_hold_triggered
+
+    picker_end_hold_pending = False
+    if picker_end_hold_triggered:
+        return
+
+    if is_virtual_key_down(VK_END):
+        picker_end_hold_triggered = True
+        if get_picker_action_hwnd():
+            open_game_market_details()
+
+
+def schedule_picker_end_hold_check():
+    global picker_end_hold_pending
+
+    if picker_end_hold_pending or picker_end_hold_triggered:
+        return
+
+    picker_end_hold_pending = True
+    root.after(max(1, int(PICKER_OPEN_HOLD_SECONDS * 1000)), resolve_picker_end_hold)
+
+
+def handle_picker_end_hotkey():
+    global picker_end_press_active, picker_end_press_was_open, picker_end_hold_triggered
+    global picker_end_latched, picker_end_press_at
+
+    if picker_end_latched or picker_end_press_active:
+        return
+
+    picker_end_latched = True
+    picker_end_press_at = time.monotonic()
+    picker_end_press_active = True
+    picker_end_press_was_open = is_picker_open()
+    picker_end_hold_triggered = False
+
+    if not picker_end_press_was_open:
+        show_picker(toggle=False)
+
+    schedule_picker_end_hold_check()
+
+
+def finish_picker_end_press():
+    global picker_end_press_active, picker_end_hold_pending, picker_end_latched
+
+    if not picker_end_press_active:
+        picker_end_latched = False
+        return
+
+    picker_end_press_active = False
+    picker_end_hold_pending = False
+    picker_end_latched = False
+
+    if picker_end_hold_triggered:
+        return
+
+    if picker_end_press_was_open:
+        hide_picker()
+    elif not is_picker_open():
+        show_picker(toggle=False)
+
+
+def handle_right_ctrl_escape():
+    if detect_market_action_stage() != "quantity" and get_market_action_stage() != "quantity":
+        return False
+    return decrease_market_item_quantity()
+
+
+def set_order_button_hold(is_down):
+    global right_shift_order_down
+
+    if is_down == right_shift_order_down:
+        return True
+
+    if is_down:
+        if detect_market_action_stage() != "quantity" and get_market_action_stage() != "quantity":
+            return False
+        if not move_cursor_to_game_ratio(GAME_ORDER_BUTTON_X_RATIO, GAME_ORDER_BUTTON_Y_RATIO):
+            return False
+        ok = send_mouse_button(MOUSEEVENTF_LEFTDOWN)
+        right_shift_order_down = ok
+        return ok
+
+    was_down = right_shift_order_down
+    ok = send_mouse_button(MOUSEEVENTF_LEFTUP)
+    right_shift_order_down = False
+    if was_down:
+        reset_market_action_stage()
+    return ok
+
+
+def _log_direct(message):
+    append_log_line(message)
 
 
 def set_clipboard_text_win32(text):
@@ -1527,9 +2729,25 @@ def set_clipboard_text_safe(text):
         return False
 
 
+def restore_picker_after_paste():
+    if picker_window is None or picker_window.state() == "withdrawn":
+        return
+
+    try:
+        show_tk_window_no_activate(picker_window)
+        position_picker_window()
+    except Exception:
+        pass
+
+
+def normalize_game_search_text(text):
+    return re.sub(r"[\u00a0\u202f\u2007]+", " ", str(text)).strip()
+
+
 def paste_item_name(name):
     global last_picker_paste_at, last_picker_paste_name, picker_target_hwnd
 
+    name = normalize_game_search_text(name)
     now = time.monotonic()
     if name == last_picker_paste_name and now - last_picker_paste_at < 0.5:
         return
@@ -1572,6 +2790,8 @@ def paste_item_name(name):
         finally:
             if cursor_saved:
                 ctypes.windll.user32.SetCursorPos(old_cursor.x, old_cursor.y)
+            root.after(0, restore_picker_after_paste)
+            root.after(120, restore_picker_after_paste)
 
     threading.Thread(target=do_paste, daemon=True).start()
 
@@ -1585,6 +2805,30 @@ def get_hwnd_rect(hwnd):
         return None
 
     return rect.left, rect.top, rect.right, rect.bottom
+
+
+def get_picker_content_height():
+    if picker_total_content_height > 0:
+        return picker_total_content_height
+    if picker_canvas is None:
+        return PICKER_ROW_HEIGHT * PICKER_MIN_ROWS
+
+    try:
+        picker_canvas.update_idletasks()
+        bbox = picker_canvas.bbox("all")
+    except Exception:
+        bbox = None
+
+    if not bbox:
+        return PICKER_ROW_HEIGHT * PICKER_MIN_ROWS
+
+    return max(0, bbox[3] - bbox[1])
+
+
+def get_picker_total_height(max_available_height):
+    min_height = PICKER_TIMER_HEIGHT + PICKER_ROW_HEIGHT * PICKER_MIN_ROWS
+    desired_height = PICKER_TIMER_HEIGHT + get_picker_content_height() + 4
+    return max(min_height, min(desired_height, PICKER_MAX_HEIGHT, max_available_height))
 
 
 def position_picker_window():
@@ -1610,49 +2854,19 @@ def position_picker_window():
         + round(target_height * PICKER_GAME_SEARCH_Y_RATIO)
         + round(PICKER_GAME_SEARCH_Y_OFFSET_PIXELS * scale)
     )
-    total_height = PICKER_HEIGHT + PICKER_TIMER_HEIGHT
+    x -= round(PICKER_LEFT_EXPAND_PIXELS * scale)
     y -= PICKER_TIMER_HEIGHT
+    bottom_margin = round(PICKER_BOTTOM_MARGIN_PIXELS * scale)
+    max_available_height = max(
+        PICKER_TIMER_HEIGHT,
+        bottom - y - bottom_margin,
+    )
+    total_height = get_picker_total_height(max_available_height)
 
     x = min(max(left, x), right - PICKER_WIDTH)
     y = min(max(top, y), bottom - total_height)
 
     picker_window.geometry(f"{PICKER_WIDTH}x{total_height}{x:+d}{y:+d}")
-
-
-def clear_picker_rows():
-    if picker_inner is None:
-        return
-
-    for child in picker_inner.winfo_children():
-        child.destroy()
-
-
-def add_picker_separator(text):
-    frame = tk.Frame(picker_inner, bg="#181818", height=34)
-    frame.pack(fill="x", padx=8, pady=(8, 4))
-    frame.pack_propagate(False)
-
-    left = tk.Frame(frame, bg="#3a3a3a", height=1)
-    left.pack(side="left", fill="x", expand=True, padx=(0, 10), pady=16)
-
-    label = tk.Label(
-        frame,
-        text=text,
-        fg="#d7d7d7",
-        bg="#181818",
-        font=("Segoe UI", 10, "bold"),
-    )
-    label.pack(side="left")
-
-    right = tk.Frame(frame, bg="#3a3a3a", height=1)
-    right.pack(side="left", fill="x", expand=True, padx=(10, 0), pady=16)
-
-
-def show_picker_message(text):
-    clear_picker_rows()
-    add_picker_separator(text)
-    picker_inner.update_idletasks()
-    picker_canvas.configure(scrollregion=picker_canvas.bbox("all"))
 
 
 def get_picker_item_kind(item):
@@ -1673,80 +2887,6 @@ def format_picker_profit(item):
 
     sign = "+" if profit > 0 else ""
     return f"{sign}{profit:.2f}"
-
-
-def add_picker_item_row(item):
-    row = tk.Frame(picker_inner, bg="#101418", height=PICKER_ROW_HEIGHT, cursor="hand2")
-    row.pack(fill="x", padx=8, pady=2)
-    row.pack_propagate(False)
-
-    kind = get_picker_item_kind(item)
-    profit_text = format_picker_profit(item)
-    profit_base_bg = "#101418"
-    profit_hover_bg = "#1b242c"
-
-    name_label = tk.Label(
-        row,
-        text=item["name"],
-        fg="#f0cf23",
-        bg="#101418",
-        anchor="w",
-        font=("Segoe UI", 11, "bold"),
-    )
-    name_label.pack(side="left", fill="both", expand=True, padx=(12, 8))
-
-    profit_label = None
-    if item.get("section") == "Декор":
-        profit_label = tk.Label(
-            row,
-            text=format_picker_profit(item),
-            fg="#67e86f",
-            bg="#101418",
-            anchor="e",
-            font=("Segoe UI", 10, "bold"),
-            width=7,
-        )
-        profit_label.pack(side="right", fill="y", padx=(0, 12))
-
-    if profit_label is None and kind == "flash" and profit_text:
-        profit_base_bg = "#f0cf23"
-        profit_hover_bg = "#ffe04c"
-        profit_label = tk.Label(
-            row,
-            text=profit_text,
-            fg="#111111",
-            bg=profit_base_bg,
-            anchor="w",
-            font=("Segoe UI", 10, "bold"),
-            width=7,
-            padx=6,
-        )
-        profit_label.pack(side="right", fill="y")
-
-    def on_enter(event):
-        row.configure(bg="#1b242c")
-        name_label.configure(bg="#1b242c")
-        if profit_label is not None:
-            profit_label.configure(bg=profit_hover_bg)
-
-    def on_leave(event):
-        row.configure(bg="#101418")
-        name_label.configure(bg="#101418")
-        if profit_label is not None:
-            profit_label.configure(bg=profit_base_bg)
-
-    def on_click(event):
-        paste_item_name(item["name"])
-
-    clickable_widgets = [row, name_label]
-    if profit_label is not None:
-        clickable_widgets.append(profit_label)
-
-    for widget in clickable_widgets:
-        widget.bind("<Enter>", on_enter)
-        widget.bind("<Leave>", on_leave)
-        widget.bind("<Button-1>", on_click)
-        widget.bind("<ButtonRelease-1>", on_click)
 
 
 def format_picker_number(value):
@@ -1793,75 +2933,6 @@ def get_picker_rarity_color(item):
     return get_rarity_style(item.get("rarity_id"))["color"]
 
 
-def add_picker_cell(
-    parent,
-    text,
-    width,
-    height,
-    fg,
-    bg,
-    anchor="e",
-    font=("Segoe UI", 9, "bold"),
-    padx=(6, 6),
-):
-    frame = tk.Frame(parent, bg=bg, width=width, height=height)
-    frame.pack(side="left", fill="y")
-    frame.pack_propagate(False)
-
-    label = tk.Label(
-        frame,
-        text=text,
-        fg=fg,
-        bg=bg,
-        anchor=anchor,
-        font=font,
-    )
-    label.pack(fill="both", expand=True, padx=padx)
-    return frame, label
-
-
-def add_picker_header_cell(parent, text, width, bg="#181818", fg="#c7ced8", anchor="e"):
-    return add_picker_cell(
-        parent,
-        text,
-        width,
-        PICKER_HEADER_HEIGHT,
-        fg,
-        bg,
-        anchor=anchor,
-        font=("Segoe UI", 8, "bold"),
-        padx=(5, 5),
-    )
-
-
-def add_picker_table_header(kind):
-    row = tk.Frame(picker_inner, bg="#181818", height=PICKER_HEADER_HEIGHT)
-    row.pack(fill="x", padx=8, pady=(0, 2))
-    row.pack_propagate(False)
-
-    if kind == "flash":
-        columns = [
-            ("Название", PICKER_NAME_COL_WIDTH, "#181818", "#aeb7c6", "w"),
-            ("60 мин", PICKER_FLASH_HISTORY_COL_WIDTH, "#d69d34", "#111111", "e"),
-            ("Продажа", PICKER_FLASH_PRICE_COL_WIDTH, "#08aeca", "#111111", "e"),
-            ("Покупка", PICKER_FLASH_PRICE_COL_WIDTH, "#08aeca", "#111111", "e"),
-            ("Предл.", PICKER_FLASH_ORDER_COL_WIDTH, "#181818", "#aeb7c6", "e"),
-            ("Запр.", PICKER_FLASH_ORDER_COL_WIDTH, "#181818", "#aeb7c6", "e"),
-            ("ROI", PICKER_FLASH_ROI_COL_WIDTH, "#7ac36f", "#111111", "e"),
-            ("Прибыль", PICKER_PROFIT_COL_WIDTH, "#f0cf23", "#111111", "w"),
-        ]
-    else:
-        columns = [
-            ("Предмет", PICKER_DECOR_NAME_COL_WIDTH, "#181818", "#aeb7c6", "w"),
-            ("Прибыль", PICKER_DECOR_VALUE_COL_WIDTH, "#181818", "#67e86f", "e"),
-            ("Цена", PICKER_DECOR_VALUE_COL_WIDTH, "#181818", "#dfe7f3", "e"),
-            ("ROI", PICKER_DECOR_VALUE_COL_WIDTH, "#181818", "#67e86f", "e"),
-        ]
-
-    for text, width, bg, fg, anchor in columns:
-        add_picker_header_cell(row, text, width, bg=bg, fg=fg, anchor=anchor)
-
-
 def measure_picker_header(text, minimum):
     try:
         font = tkfont.Font(family="Segoe UI", size=8, weight="bold")
@@ -1871,10 +2942,14 @@ def measure_picker_header(text, minimum):
 
 
 def get_picker_table_inner_width():
-    return PICKER_WIDTH - 36
+    return PICKER_WIDTH - 18
 
 
 def get_picker_columns(kind):
+    cached_columns = picker_columns_cache.get(kind)
+    if cached_columns is not None:
+        return cached_columns
+
     if kind == "flash":
         value_columns = [
             {"key": "history_sell", "title": "60 мин", "min": PICKER_FLASH_HISTORY_COL_WIDTH, "bg": "#d69d34", "fg": "#111111", "anchor": "e"},
@@ -1899,11 +2974,15 @@ def get_picker_columns(kind):
     for column in value_columns:
         column["width"] = measure_picker_header(column["title"], column["min"])
 
-    name_width = max(
-        measure_picker_header(name_title, name_min_width),
-        get_picker_table_inner_width() - sum(column["width"] for column in value_columns),
-    )
-    return [
+    table_width = get_picker_table_inner_width()
+    value_width = sum(column["width"] for column in value_columns)
+    remaining_name_width = max(120, table_width - value_width)
+    preferred_name_width = measure_picker_header(name_title, name_min_width)
+    name_width = max(preferred_name_width, remaining_name_width)
+    if name_width + value_width > table_width:
+        name_width = remaining_name_width
+
+    columns = [
         {
             "key": "name",
             "title": name_title,
@@ -1914,46 +2993,246 @@ def get_picker_columns(kind):
         },
         *value_columns,
     ]
-
-
-def get_picker_column_map(kind):
-    return {column["key"]: column for column in get_picker_columns(kind)}
-
-
-def add_picker_table_header(kind):
-    row = tk.Frame(picker_inner, bg="#181818", height=PICKER_HEADER_HEIGHT)
-    row.pack(fill="x", padx=8, pady=(0, 2))
-    row.pack_propagate(False)
-
-    for column in get_picker_columns(kind):
-        add_picker_header_cell(
-            row,
-            column["title"],
-            column["width"],
-            bg=column["bg"],
-            fg=column["fg"],
-            anchor=column["anchor"],
-        )
+    picker_columns_cache[kind] = columns
+    return columns
 
 
 def get_price_for_rarity(prices, rarity_id):
     return prices.get(rarity_id, prices.get(str(rarity_id)))
 
 
-def add_picker_decor_prices(prices):
-    row = tk.Frame(picker_inner, bg="#101418", height=42)
-    row.pack(fill="x", padx=8, pady=(0, 4))
-    row.pack_propagate(False)
+def get_picker_canvas_font(size=9, weight="bold"):
+    key = (size, weight)
+    font = picker_font_cache.get(key)
+    if font is None:
+        font = tkfont.Font(family="Segoe UI", size=size, weight=weight)
+        picker_font_cache[key] = font
+    return font
 
-    title = tk.Label(
-        row,
-        text="По цене продажи:",
-        fg="#c7ced8",
-        bg="#101418",
-        anchor="w",
-        font=("Segoe UI", 9, "bold"),
+
+def fit_picker_canvas_text(text, font, max_width):
+    text = "" if text is None else str(text)
+    if font.measure(text) <= max_width:
+        return text
+
+    ellipsis = "..."
+    max_width = max(0, max_width - font.measure(ellipsis))
+    while text and font.measure(text) > max_width:
+        text = text[:-1]
+    return text + ellipsis if text else ellipsis
+
+
+def draw_picker_rounded_rect(x1, y1, x2, y2, radius, fill, outline=""):
+    if picker_canvas is None:
+        return
+
+    radius = max(1, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
+    picker_canvas.create_rectangle(x1 + radius, y1, x2 - radius, y2, fill=fill, outline=outline)
+    picker_canvas.create_rectangle(x1, y1 + radius, x2, y2 - radius, fill=fill, outline=outline)
+    picker_canvas.create_oval(x1, y1, x1 + radius * 2, y1 + radius * 2, fill=fill, outline=outline)
+    picker_canvas.create_oval(x2 - radius * 2, y1, x2, y1 + radius * 2, fill=fill, outline=outline)
+    picker_canvas.create_oval(x1, y2 - radius * 2, x1 + radius * 2, y2, fill=fill, outline=outline)
+    picker_canvas.create_oval(x2 - radius * 2, y2 - radius * 2, x2, y2, fill=fill, outline=outline)
+
+
+def draw_picker_rounded_outline(x1, y1, x2, y2, radius, color, width=1):
+    if picker_canvas is None:
+        return
+
+    radius = max(1, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
+    picker_canvas.create_line(x1 + radius, y1, x2 - radius, y1, fill=color, width=width)
+    picker_canvas.create_line(x2, y1 + radius, x2, y2 - radius, fill=color, width=width)
+    picker_canvas.create_line(x1 + radius, y2, x2 - radius, y2, fill=color, width=width)
+    picker_canvas.create_line(x1, y1 + radius, x1, y2 - radius, fill=color, width=width)
+    picker_canvas.create_arc(
+        x1,
+        y1,
+        x1 + radius * 2,
+        y1 + radius * 2,
+        start=90,
+        extent=90,
+        style="arc",
+        outline=color,
+        width=width,
     )
-    title.pack(side="left", fill="y", padx=(10, 8))
+    picker_canvas.create_arc(
+        x2 - radius * 2,
+        y1,
+        x2,
+        y1 + radius * 2,
+        start=0,
+        extent=90,
+        style="arc",
+        outline=color,
+        width=width,
+    )
+    picker_canvas.create_arc(
+        x2 - radius * 2,
+        y2 - radius * 2,
+        x2,
+        y2,
+        start=270,
+        extent=90,
+        style="arc",
+        outline=color,
+        width=width,
+    )
+    picker_canvas.create_arc(
+        x1,
+        y2 - radius * 2,
+        x1 + radius * 2,
+        y2,
+        start=180,
+        extent=90,
+        style="arc",
+        outline=color,
+        width=width,
+    )
+
+
+def clear_picker_rows():
+    global picker_display_rows, picker_total_content_height, picker_hover_row_index
+    global picker_render_signature
+
+    picker_display_rows = []
+    picker_total_content_height = 0
+    picker_hover_row_index = None
+    picker_render_signature = None
+    if picker_canvas is not None:
+        picker_canvas.delete("all")
+
+
+def get_picker_render_signature():
+    return (id(picker_items), len(picker_items), picker_last_refresh)
+
+
+def build_picker_display_rows():
+    rows = []
+    y = 0
+    current_section = None
+    header_section = None
+
+    def add_row(row_type, height, **data):
+        nonlocal y
+        row = {"type": row_type, "y": y, "height": height, **data}
+        rows.append(row)
+        y += height
+
+    for item in picker_items:
+        if item.get("separator"):
+            add_row("separator", 34, text=item.get("section", ""))
+            current_section = item.get("section")
+            header_section = None
+            continue
+
+        if item.get("decor_prices"):
+            add_row("decor_prices", 42, prices=item.get("prices", {}))
+            continue
+
+        if item.get("section") != current_section:
+            add_row("separator", 34, text=item.get("section", ""))
+            current_section = item.get("section")
+            header_section = None
+
+        if current_section != header_section:
+            add_row("header", PICKER_HEADER_HEIGHT, kind=get_picker_item_kind(item))
+            header_section = current_section
+
+        add_row("item", PICKER_ROW_HEIGHT, item=item, kind=get_picker_item_kind(item))
+
+    return rows, y
+
+
+def draw_picker_cell(
+    x,
+    y,
+    width,
+    height,
+    text,
+    fg="#dfe7f3",
+    bg="#101418",
+    anchor="e",
+    font=None,
+    padx=7,
+):
+    if picker_canvas is None:
+        return
+
+    font = font or get_picker_canvas_font(9, "bold")
+    picker_canvas.create_rectangle(
+        x,
+        y,
+        x + width,
+        y + height,
+        fill=bg,
+        outline="#0d1115",
+        width=1,
+    )
+
+    if anchor == "center":
+        text_x = x + width / 2
+        text_anchor = "center"
+        max_width = width - padx * 2
+    elif anchor == "w":
+        text_x = x + padx
+        text_anchor = "w"
+        max_width = width - padx * 2
+    else:
+        text_x = x + width - padx
+        text_anchor = "e"
+        max_width = width - padx * 2
+
+    picker_canvas.create_text(
+        text_x,
+        y + height / 2,
+        text=fit_picker_canvas_text(text, font, max_width),
+        fill=fg,
+        anchor=text_anchor,
+        font=font,
+    )
+
+
+def draw_picker_separator_canvas(row, width):
+    y = row["y"]
+    height = row["height"]
+    text = row.get("text", "")
+    font = get_picker_canvas_font(11, "bold")
+    center_x = width / 2
+    center_y = y + height / 2
+    text_width = font.measure(text)
+    line_gap = text_width / 2 + 18
+
+    picker_canvas.create_rectangle(8, y + 7, width - 8, y + height - 6, fill="#181818", outline="")
+    picker_canvas.create_line(8, center_y, center_x - line_gap, center_y, fill="#373737")
+    picker_canvas.create_line(center_x + line_gap, center_y, width - 8, center_y, fill="#373737")
+    picker_canvas.create_text(
+        center_x,
+        center_y,
+        text=text,
+        fill="#d7d7d7",
+        anchor="center",
+        font=font,
+    )
+
+
+def draw_picker_decor_prices_canvas(row, width):
+    y = row["y"]
+    height = row["height"]
+    prices = row.get("prices", {})
+    font = get_picker_canvas_font(9, "bold")
+    x = 14
+
+    picker_canvas.create_rectangle(8, y, width - 8, y + height, fill="#101418", outline="")
+    title = "По цене продажи:"
+    picker_canvas.create_text(
+        x,
+        y + height / 2,
+        text=title,
+        fill="#c7ced8",
+        anchor="w",
+        font=font,
+    )
+    x += font.measure(title) + 14
 
     rarity_ids = []
     for rarity_key in prices.keys():
@@ -1970,219 +3249,367 @@ def add_picker_decor_prices(prices):
             continue
 
         style = get_rarity_style(rarity_id)
-        chip = tk.Frame(row, bg="#151b21", height=28)
-        chip.pack(side="left", padx=(0, 6), pady=7)
+        label = f'{style["short"]} {format_picker_number(price)}'
+        chip_width = font.measure(label) + 16
+        if x + chip_width > width - 8:
+            break
 
-        label = tk.Label(
-            chip,
-            text=f'{style["short"]} {format_picker_number(price)}',
-            fg=style["color"],
-            bg="#151b21",
-            anchor="center",
-            font=("Segoe UI", 9, "bold"),
+        picker_canvas.create_rectangle(
+            x,
+            y + 7,
+            x + chip_width,
+            y + height - 7,
+            fill="#151b21",
+            outline="",
         )
-        label.pack(fill="both", expand=True, padx=8)
+        picker_canvas.create_text(
+            x + 8,
+            y + height / 2,
+            text=label,
+            fill=style["color"],
+            anchor="w",
+            font=font,
+        )
+        x += chip_width + 6
 
 
-def add_picker_value_cell(
-    row,
-    text,
-    width,
-    fg="#dfe7f3",
-    bg="#101418",
-    hover_bg="#1b242c",
-    anchor="e",
-    font=("Segoe UI", 9, "bold"),
-    padx=(6, 6),
-):
-    frame, label = add_picker_cell(
-        row,
-        text,
-        width,
-        PICKER_ROW_HEIGHT,
-        fg,
-        bg,
-        anchor=anchor,
-        font=font,
-        padx=padx,
-    )
+def draw_picker_header_canvas(row):
+    x = 8
+    kind = row.get("kind", "")
+    y = row["y"]
+    font = get_picker_canvas_font(8, "bold")
+
+    for column in get_picker_columns(kind):
+        draw_picker_cell(
+            x,
+            y,
+            column["width"],
+            row["height"],
+            column["title"],
+            fg="#aeb7c6",
+            bg="#181818",
+            anchor=column["anchor"],
+            font=font,
+            padx=6,
+        )
+        x += column["width"]
+
+
+def get_picker_item_cell_values(item):
+    kind = get_picker_item_kind(item)
+    if kind == "flash":
+        return {
+            "name": item.get("name", ""),
+            "history_sell": format_picker_number(item.get("history_sell")),
+            "sell": format_picker_number(item.get("sell")),
+            "buy": format_picker_number(item.get("buy")),
+            "sell_orders": format_picker_int(item.get("sell_orders")),
+            "buy_orders": format_picker_int(item.get("buy_orders")),
+            "roi": format_picker_roi(item),
+            "profit": format_picker_profit(item),
+        }
+
     return {
-        "widgets": (frame, label),
-        "base_bg": bg,
-        "hover_bg": hover_bg,
+        "name": item.get("name", ""),
+        "profit": format_picker_profit(item),
+        "price": format_picker_number(item.get("price")),
+        "roi": format_picker_roi(item),
     }
 
 
-def add_picker_item_row(item):
-    kind = get_picker_item_kind(item)
-    row = tk.Frame(picker_inner, bg="#101418", height=PICKER_ROW_HEIGHT, cursor="hand2")
-    row.pack(fill="x", padx=8, pady=1)
-    row.pack_propagate(False)
+def get_picker_hover_bg(kind, key, default_bg):
+    if key == "history_sell":
+        return "#e1aa3f"
+    if kind == "flash" and key in ("sell", "buy"):
+        return "#18bfd8"
+    if kind == "flash" and key == "roi":
+        return "#88d47e"
+    if kind == "flash" and key == "profit":
+        return "#f6d847"
+    return "#16202a" if default_bg == "#101418" else default_bg
 
-    cells = []
-    column_map = get_picker_column_map(kind)
-    if kind == "flash":
-        cells.extend(
-            [
-                add_picker_value_cell(
-                    row,
-                    item["name"],
-                    column_map["name"]["width"],
-                    fg="#f0cf23",
-                    anchor="w",
-                    font=("Segoe UI", 9, "bold"),
-                    padx=(8, 5),
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_number(item.get("history_sell")),
-                    column_map["history_sell"]["width"],
-                    fg="#111111",
-                    bg="#d69d34",
-                    hover_bg="#e9b64d",
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_number(item.get("sell")),
-                    column_map["sell"]["width"],
-                    fg="#111111",
-                    bg="#08aeca",
-                    hover_bg="#21c2dd",
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_number(item.get("buy")),
-                    column_map["buy"]["width"],
-                    fg="#111111",
-                    bg="#08aeca",
-                    hover_bg="#21c2dd",
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_int(item.get("sell_orders")),
-                    column_map["sell_orders"]["width"],
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_int(item.get("buy_orders")),
-                    column_map["buy_orders"]["width"],
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_roi(item),
-                    column_map["roi"]["width"],
-                    fg="#111111",
-                    bg="#7ac36f",
-                    hover_bg="#8dd982",
-                    anchor="center",
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_profit(item),
-                    column_map["profit"]["width"],
-                    fg="#111111",
-                    bg="#f0cf23",
-                    hover_bg="#ffe04c",
-                    anchor="w",
-                    padx=(7, 5),
-                ),
-            ]
+
+def draw_picker_item_canvas(row, is_hover=False):
+    item = row["item"]
+    kind = row.get("kind", get_picker_item_kind(item))
+    values = get_picker_item_cell_values(item)
+    x = 8
+    y = row["y"]
+    font = get_picker_canvas_font(9, "bold")
+
+    for column in get_picker_columns(kind):
+        key = column["key"]
+        fg = "#dfe7f3"
+        bg = "#16202a" if is_hover else "#101418"
+        anchor = column["anchor"]
+        padx = 7
+
+        if key == "name":
+            fg = get_picker_rarity_color(item)
+            anchor = "w"
+            padx = 18 if is_hover else 9
+        elif kind == "flash" and key == "history_sell":
+            fg = "#111111"
+            bg = "#d69d34"
+        elif kind == "flash" and key in ("sell", "buy"):
+            fg = "#111111"
+            bg = "#08aeca"
+        elif kind == "flash" and key == "roi":
+            fg = "#111111"
+            bg = "#7ac36f"
+        elif kind == "flash" and key == "profit":
+            fg = "#111111"
+            bg = "#f0cf23"
+            anchor = "w"
+            padx = 8
+        elif kind == "decor" and key in ("profit", "roi"):
+            fg = "#67e86f"
+
+        if is_hover:
+            bg = get_picker_hover_bg(kind, key, bg)
+
+        draw_picker_cell(
+            x,
+            y,
+            column["width"],
+            row["height"],
+            values.get(key, ""),
+            fg=fg,
+            bg=bg,
+            anchor=anchor,
+            font=font,
+            padx=padx,
         )
-    else:
-        cells.extend(
-            [
-                add_picker_value_cell(
-                    row,
-                    item["name"],
-                    column_map["name"]["width"],
-                    fg=get_picker_rarity_color(item),
-                    anchor="w",
-                    font=("Segoe UI", 9, "bold"),
-                    padx=(8, 5),
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_profit(item),
-                    column_map["profit"]["width"],
-                    fg="#67e86f",
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_number(item.get("price")),
-                    column_map["price"]["width"],
-                ),
-                add_picker_value_cell(
-                    row,
-                    format_picker_roi(item),
-                    column_map["roi"]["width"],
-                    fg="#67e86f",
-                ),
-            ]
+        x += column["width"]
+
+    if is_hover:
+        table_width = sum(column["width"] for column in get_picker_columns(kind))
+        draw_picker_rounded_outline(
+            8.5,
+            y + 3.5,
+            8 + table_width - 0.5,
+            y + row["height"] - 3.5,
+            7,
+            color="#34424d",
+            width=1,
+        )
+        draw_picker_rounded_rect(
+            13,
+            y + 10,
+            15,
+            y + row["height"] - 10,
+            1,
+            fill="#f0cf23",
         )
 
-    clickable_widgets = [row]
-    for cell in cells:
-        clickable_widgets.extend(cell["widgets"])
 
-    def on_enter(event):
-        row.configure(bg="#1b242c")
-        for cell in cells:
-            for widget in cell["widgets"]:
-                widget.configure(bg=cell["hover_bg"])
+def draw_picker_canvas_rows():
+    global picker_total_content_height, picker_render_signature
 
-    def on_leave(event):
-        row.configure(bg="#101418")
-        for cell in cells:
-            for widget in cell["widgets"]:
-                widget.configure(bg=cell["base_bg"])
+    if picker_canvas is None:
+        return
 
-    def on_click(event):
-        paste_item_name(item["name"])
+    picker_canvas.delete("all")
+    width = max(PICKER_WIDTH, picker_canvas.winfo_width())
+    rows, total_height = build_picker_display_rows()
 
-    for widget in clickable_widgets:
-        widget.bind("<Enter>", on_enter)
-        widget.bind("<Leave>", on_leave)
-        widget.bind("<Button-1>", on_click)
-        widget.bind("<ButtonRelease-1>", on_click)
+    picker_display_rows[:] = rows
+    picker_total_content_height = total_height
+    picker_canvas.create_rectangle(0, 0, width, max(total_height, 1), fill="#0b0f14", outline="")
+
+    for row_index, row in enumerate(rows):
+        row_type = row["type"]
+        if row_type == "separator":
+            draw_picker_separator_canvas(row, width)
+        elif row_type == "decor_prices":
+            draw_picker_decor_prices_canvas(row, width)
+        elif row_type == "header":
+            draw_picker_header_canvas(row)
+        elif row_type == "item":
+            draw_picker_item_canvas(
+                row,
+                is_hover=(
+                    row_index == picker_hover_row_index
+                    or row_index == picker_selected_row_index
+                ),
+            )
+
+    picker_canvas.configure(scrollregion=(0, 0, width, max(total_height, 1)))
+    picker_render_signature = get_picker_render_signature()
 
 
-def populate_picker():
+def show_picker_message(text):
+    global picker_display_rows, picker_total_content_height, picker_hover_row_index
+    global picker_selected_row_index, picker_render_signature
+
+    if picker_canvas is None:
+        return
+
+    picker_hover_row_index = None
+    picker_selected_row_index = None
+    picker_display_rows = [{"type": "separator", "text": text, "y": 0, "height": 34}]
+    picker_total_content_height = 34
+    picker_render_signature = ("message", text)
+    picker_canvas.delete("all")
+    width = max(PICKER_WIDTH, picker_canvas.winfo_width())
+    picker_canvas.create_rectangle(0, 0, width, 34, fill="#0b0f14", outline="")
+    draw_picker_separator_canvas(picker_display_rows[0], width)
+    picker_canvas.configure(scrollregion=(0, 0, width, 34))
+
+
+def populate_picker(force=False):
+    if picker_canvas is None:
+        return
+
+    if not force and picker_display_rows and picker_render_signature == get_picker_render_signature():
+        if picker_status is not None:
+            picker_status.configure(text="")
+        if picker_window is not None and picker_window.state() != "withdrawn":
+            position_picker_window()
+        return
+
     clear_picker_rows()
-
-    current_section = None
-    header_section = None
-    for item in picker_items:
-        if item.get("separator"):
-            add_picker_separator(item["section"])
-            current_section = item["section"]
-            header_section = None
-            continue
-
-        if item.get("decor_prices"):
-            add_picker_decor_prices(item.get("prices", {}))
-            continue
-
-        if item.get("section") != current_section:
-            add_picker_separator(item["section"])
-            current_section = item["section"]
-            header_section = None
-
-        if current_section != header_section:
-            add_picker_table_header(get_picker_item_kind(item))
-            header_section = current_section
-
-        add_picker_item_row(item)
-
-    picker_inner.update_idletasks()
-    picker_canvas.configure(scrollregion=picker_canvas.bbox("all"))
+    if not picker_items:
+        show_picker_message("Загрузка...")
+    else:
+        draw_picker_canvas_rows()
 
     if picker_status is not None:
         picker_status.configure(text="")
 
+    if picker_window is not None and picker_window.state() != "withdrawn":
+        position_picker_window()
+
+
+def get_picker_canvas_row_at(canvas_y):
+    for index, row in enumerate(picker_display_rows):
+        if row["y"] <= canvas_y < row["y"] + row["height"]:
+            return index, row
+    return None, None
+
+
+def get_picker_canvas_item_at(event):
+    if picker_canvas is None:
+        return None, None
+
+    canvas_y = picker_canvas.canvasy(event.y)
+    index, row = get_picker_canvas_row_at(canvas_y)
+    if not row or row.get("type") != "item":
+        return index, None
+    return index, row.get("item")
+
+
+def on_picker_canvas_click(event):
+    global picker_selected_row_index
+
+    row_index, item = get_picker_canvas_item_at(event)
+    if item:
+        picker_selected_row_index = row_index
+        draw_picker_hover(row_index)
+        reset_market_action_stage()
+        paste_item_name(item["name"])
+
+
+def get_picker_item_row_indices():
+    return [
+        index
+        for index, row in enumerate(picker_display_rows)
+        if row.get("type") == "item" and row.get("item")
+    ]
+
+
+def scroll_picker_row_into_view(row):
+    if picker_canvas is None or picker_total_content_height <= 0:
+        return
+
+    canvas_height = max(1, picker_canvas.winfo_height())
+    top = picker_canvas.canvasy(0)
+    bottom = top + canvas_height
+    row_top = row["y"]
+    row_bottom = row["y"] + row["height"]
+
+    if row_top < top:
+        picker_canvas.yview_moveto(row_top / max(1, picker_total_content_height))
+    elif row_bottom > bottom:
+        target = (row_bottom - canvas_height) / max(1, picker_total_content_height)
+        picker_canvas.yview_moveto(max(0, target))
+
+
+def select_picker_row(row_index, paste=True):
+    global picker_selected_row_index, picker_hover_row_index
+
+    if row_index is None or row_index < 0 or row_index >= len(picker_display_rows):
+        return
+
+    row = picker_display_rows[row_index]
+    item = row.get("item")
+    if row.get("type") != "item" or not item:
+        return
+
+    picker_selected_row_index = row_index
+    picker_hover_row_index = row_index
+    scroll_picker_row_into_view(row)
+    draw_picker_hover(row_index)
+    if paste:
+        reset_market_action_stage()
+        paste_item_name(item["name"])
+
+
+def move_picker_selection(direction):
+    if picker_window is None or picker_window.state() == "withdrawn":
+        return
+
+    item_rows = get_picker_item_row_indices()
+    if not item_rows:
+        return
+
+    if picker_selected_row_index not in item_rows:
+        target_index = item_rows[0] if direction > 0 else item_rows[-1]
+    else:
+        current_position = item_rows.index(picker_selected_row_index)
+        next_position = max(0, min(len(item_rows) - 1, current_position + direction))
+        target_index = item_rows[next_position]
+
+    select_picker_row(target_index, paste=True)
+
+
+def draw_picker_hover(row_index):
+    if picker_canvas is None:
+        return
+
+    top = picker_canvas.yview()[0]
+    draw_picker_canvas_rows()
+    try:
+        picker_canvas.yview_moveto(top)
+    except Exception:
+        pass
+
+
+def on_picker_canvas_motion(event):
+    global picker_hover_row_index
+
+    row_index, item = get_picker_canvas_item_at(event)
+    new_index = row_index if item else None
+    if new_index == picker_hover_row_index:
+        return
+
+    picker_hover_row_index = new_index
+    draw_picker_hover(picker_hover_row_index)
+    picker_canvas.configure(cursor="hand2" if item else "")
+
+
+def on_picker_canvas_leave(event):
+    global picker_hover_row_index
+
+    picker_hover_row_index = None
+    draw_picker_hover(None)
+    if picker_canvas is not None:
+        picker_canvas.configure(cursor="")
+
 
 def create_picker_window():
     global picker_canvas, picker_canvas_window, picker_inner, picker_status
-    global picker_timer_label, picker_window
+    global picker_timer_label, picker_status_label, picker_window, picker_hwnd
 
     if picker_window is not None:
         return
@@ -2193,8 +3620,10 @@ def create_picker_window():
     picker_window.overrideredirect(True)
     picker_window.configure(bg="#30363d")
     picker_window.attributes("-topmost", True)
-    picker_window.protocol("WM_DELETE_WINDOW", picker_window.withdraw)
-    picker_window.bind("<Escape>", lambda event: picker_window.withdraw())
+    picker_window.protocol("WM_DELETE_WINDOW", hide_picker)
+    picker_window.bind("<Escape>", lambda event: hide_picker())
+    picker_window.bind("<Up>", lambda event: move_picker_selection(-1))
+    picker_window.bind("<Down>", lambda event: move_picker_selection(1))
 
     body = tk.Frame(picker_window, bg="#0b0f14")
     body.pack(fill="both", expand=True, padx=1, pady=1)
@@ -2211,7 +3640,17 @@ def create_picker_window():
         anchor="center",
         font=("Segoe UI", 10, "bold"),
     )
-    picker_timer_label.pack(fill="both", expand=True)
+    picker_timer_label.place(relx=0.5, rely=0.5, anchor="center")
+
+    picker_status_label = tk.Label(
+        timer_frame,
+        text="",
+        fg=PICKER_STATUS_FG,
+        bg="#111417",
+        anchor="e",
+        font=("Segoe UI", 7, "bold"),
+    )
+    picker_status_label.place(relx=1.0, x=-10, rely=0.5, anchor="e")
 
     list_frame = tk.Frame(body, bg="#0b0f14")
     list_frame.pack(side="top", fill="both", expand=True)
@@ -2222,65 +3661,148 @@ def create_picker_window():
         highlightthickness=0,
         bd=0,
     )
-    scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=picker_canvas.yview)
-    picker_canvas.configure(yscrollcommand=scrollbar.set)
-
-    scrollbar.pack(side="right", fill="y")
     picker_canvas.pack(side="left", fill="both", expand=True)
-
-    picker_inner = tk.Frame(picker_canvas, bg="#0b0f14")
-    picker_canvas_window = picker_canvas.create_window(
-        (0, 0),
-        window=picker_inner,
-        anchor="nw",
-    )
+    picker_inner = None
+    picker_canvas_window = None
 
     def on_canvas_configure(event):
-        picker_canvas.itemconfigure(picker_canvas_window, width=event.width)
+        if picker_canvas_window is not None:
+            picker_canvas.itemconfigure(picker_canvas_window, width=event.width)
 
     def on_mousewheel(event):
         picker_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     picker_canvas.bind("<Configure>", on_canvas_configure)
+    picker_canvas.bind("<Button-1>", on_picker_canvas_click)
+    picker_canvas.bind("<Motion>", on_picker_canvas_motion)
+    picker_canvas.bind("<Leave>", on_picker_canvas_leave)
     picker_window.bind("<MouseWheel>", on_mousewheel)
 
     picker_status = None
     update_picker_timer_label()
     apply_no_activate(picker_window)
+    picker_hwnd = get_window_hwnd(picker_window)
 
 
-def show_picker():
-    global picker_target_hwnd
+def wake_hotkey_worker():
+    if hotkey_thread_id:
+        try:
+            ctypes.windll.user32.PostThreadMessageW(
+                hotkey_thread_id,
+                WM_APP_HOTKEY_COMMAND,
+                0,
+                0,
+            )
+        except Exception:
+            pass
+
+
+def send_hotkey_worker_command(command):
+    hotkey_command_q.put(command)
+    wake_hotkey_worker()
+
+
+def set_picker_navigation_hotkeys(enabled):
+    global picker_actions_enabled
+
+    enabled = bool(enabled)
+    if picker_actions_enabled == enabled:
+        return
+
+    picker_actions_enabled = enabled
+    send_hotkey_worker_command("register_picker_nav" if enabled else "unregister_picker_nav")
+
+
+def should_enable_picker_navigation_hotkeys():
+    return is_picker_window_visible_fast() and bool(get_picker_action_hwnd())
+
+
+def sync_picker_navigation_hotkeys():
+    set_picker_navigation_hotkeys(should_enable_picker_navigation_hotkeys())
+
+
+def reset_picker_selection():
+    global picker_selected_row_index, picker_hover_row_index
+
+    picker_selected_row_index = None
+    picker_hover_row_index = None
+
+
+def hide_picker():
+    if picker_window is not None and picker_window.state() != "withdrawn":
+        picker_window.withdraw()
+    set_picker_navigation_hotkeys(False)
+    set_order_button_hold(False)
+    reset_market_action_stage()
+
+
+def show_picker(toggle=True):
+    global picker_target_hwnd, picker_hwnd
 
     foreground_hwnd = ctypes.windll.user32.GetForegroundWindow()
-    if foreground_hwnd and not is_own_overlay_hwnd(foreground_hwnd):
+    if foreground_hwnd and not is_own_overlay_hwnd(foreground_hwnd) and is_game_window(foreground_hwnd):
         picker_target_hwnd = foreground_hwnd
-    elif last_alert_context_hwnd:
+    elif last_alert_context_hwnd and is_game_window(last_alert_context_hwnd):
         picker_target_hwnd = last_alert_context_hwnd
     create_picker_window()
 
     if picker_window.state() != "withdrawn":
-        picker_window.withdraw()
+        if not toggle:
+            position_picker_window()
+            return
+        hide_picker()
         return
 
-    position_picker_window()
-    show_tk_window_no_activate(picker_window)
-    update_picker_timer_label()
-
+    reset_market_action_stage()
     if picker_items:
         populate_picker()
     else:
         show_picker_message("Загрузка...")
 
-    if not picker_refreshing:
+    position_picker_window()
+    show_tk_window_no_activate(picker_window)
+    picker_hwnd = get_window_hwnd(picker_window)
+    sync_picker_navigation_hotkeys()
+    update_picker_timer_label()
+
+    if not has_real_picker_items(picker_items) and not picker_refreshing:
         threading.Thread(
             target=lambda: refresh_picker_and_repaint(force=True),
             daemon=True,
         ).start()
 
 
+def process_hotkey_worker_commands():
+    global picker_navigation_hotkeys_registered
+
+    while not hotkey_command_q.empty():
+        command = hotkey_command_q.get()
+
+        if command == "register_picker_nav" and not picker_navigation_hotkeys_registered:
+            registered_ids = []
+            for hotkey_id, vk, _event_name in PICKER_ACTION_HOTKEYS:
+                if ctypes.windll.user32.RegisterHotKey(None, hotkey_id, 0, vk):
+                    registered_ids.append(hotkey_id)
+                else:
+                    break
+
+            picker_navigation_hotkeys_registered = len(registered_ids) == len(PICKER_ACTION_HOTKEYS)
+            if not picker_navigation_hotkeys_registered:
+                for hotkey_id in registered_ids:
+                    ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
+                log_error("picker_nav_hotkey", "RegisterHotKey failed for picker action keys")
+
+        elif command == "unregister_picker_nav" and picker_navigation_hotkeys_registered:
+            for hotkey_id, _vk, _event_name in PICKER_ACTION_HOTKEYS:
+                ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
+            picker_navigation_hotkeys_registered = False
+
+
 def hotkey_worker():
+    global hotkey_thread_id
+
     try:
+        hotkey_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
         if not ctypes.windll.user32.RegisterHotKey(
             None,
             PICKER_HOTKEY_ID,
@@ -2289,13 +3811,86 @@ def hotkey_worker():
         ):
             log_error("hotkey", "RegisterHotKey failed for ё / `")
             return
+        if not ctypes.windll.user32.RegisterHotKey(
+            None,
+            PICKER_OPEN_END_HOTKEY_ID,
+            0,
+            VK_END,
+        ):
+            log_error("hotkey", "RegisterHotKey failed for End")
 
         msg = MSG()
         while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-            if msg.message == WM_HOTKEY and msg.wParam == PICKER_HOTKEY_ID:
-                hotkey_q.put("picker")
+            if msg.message == WM_APP_HOTKEY_COMMAND:
+                process_hotkey_worker_commands()
+            elif msg.message == WM_HOTKEY:
+                if msg.wParam == PICKER_HOTKEY_ID:
+                    hotkey_q.put("picker")
+                elif msg.wParam == PICKER_OPEN_END_HOTKEY_ID:
+                    hotkey_q.put("picker_end_open")
+                else:
+                    for hotkey_id, _vk, event_name in PICKER_ACTION_HOTKEYS:
+                        if msg.wParam == hotkey_id:
+                            hotkey_q.put(event_name)
+                            break
     except Exception as e:
         log_error("hotkey", f"Hotkey worker failed: {e}")
+
+
+def is_virtual_key_down(vk):
+    return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+
+
+def right_shift_worker():
+    global right_arrow_hold_active, right_arrow_hold_compensated, right_arrow_press_at
+    global right_arrow_was_down, right_ctrl_was_down
+
+    while True:
+        try:
+            picker_visible = picker_actions_enabled and is_picker_window_visible_fast()
+            right_down = is_virtual_key_down(VK_RIGHT)
+
+            if picker_visible and right_down and not right_arrow_was_down:
+                right_arrow_was_down = True
+                right_arrow_press_at = time.monotonic()
+                right_arrow_hold_active = False
+                right_arrow_hold_compensated = False
+
+            if picker_visible and right_down and right_arrow_was_down and not right_arrow_hold_active:
+                held_for = time.monotonic() - right_arrow_press_at
+                if held_for >= RIGHT_ARROW_HOLD_SECONDS and get_picker_action_hwnd():
+                    stage = detect_market_action_stage() or get_market_action_stage()
+                    if stage == "quantity":
+                        if right_arrow_last_action_stage == "quantity" and not right_arrow_hold_compensated:
+                            decrease_market_item_quantity()
+                            right_arrow_hold_compensated = True
+                        if set_order_button_hold(True):
+                            right_arrow_hold_active = True
+
+            if (not picker_visible or not right_down) and (right_arrow_was_down or right_arrow_hold_active):
+                if right_arrow_hold_active or right_shift_order_down:
+                    set_order_button_hold(False)
+                right_arrow_was_down = False
+                right_arrow_hold_active = False
+                right_arrow_hold_compensated = False
+
+            right_ctrl_down = is_virtual_key_down(VK_RCONTROL)
+            if right_ctrl_down and not right_ctrl_was_down:
+                if picker_visible and get_picker_action_hwnd():
+                    handle_right_ctrl_escape()
+            right_ctrl_was_down = right_ctrl_down
+
+            end_down = is_virtual_key_down(VK_END)
+            end_ready_to_release = (
+                not picker_end_latched
+                or time.monotonic() - picker_end_press_at >= PICKER_END_RELEASE_GRACE_SECONDS
+            )
+            if not end_down and end_ready_to_release:
+                finish_picker_end_press()
+        except Exception as e:
+            log_error("right_shift", f"Right Shift worker failed: {e}")
+
+        time.sleep(max(0.005, RIGHT_SHIFT_POLL_SECONDS))
 
 
 def check_hotkeys():
@@ -2303,7 +3898,31 @@ def check_hotkeys():
         event = hotkey_q.get()
         if event == "picker":
             show_picker()
+        elif event == "picker_end_open":
+            handle_picker_end_hotkey()
+        elif event == "picker_up":
+            if should_enable_picker_navigation_hotkeys():
+                move_picker_selection(-1)
+            else:
+                sync_picker_navigation_hotkeys()
+        elif event == "picker_down":
+            if should_enable_picker_navigation_hotkeys():
+                move_picker_selection(1)
+            else:
+                sync_picker_navigation_hotkeys()
+        elif event == "picker_right":
+            if should_enable_picker_navigation_hotkeys():
+                if not right_arrow_hold_active:
+                    handle_market_action_right()
+            else:
+                sync_picker_navigation_hotkeys()
+        elif event == "picker_left":
+            if should_enable_picker_navigation_hotkeys():
+                handle_market_action_left()
+            else:
+                sync_picker_navigation_hotkeys()
 
+    sync_picker_navigation_hotkeys()
     root.after(50, check_hotkeys)
 
 
@@ -2830,27 +4449,33 @@ root.configure(bg=TRANSPARENT_BG)
 root.attributes("-transparentcolor", TRANSPARENT_BG)
 root.attributes("-alpha", NORMAL_ALPHA)
 
-canvas = tk.Canvas(
-    root,
-    width=notch_width,
-    height=notch_height,
-    bg=TRANSPARENT_BG,
-    highlightthickness=0,
-    bd=0,
-)
-canvas.pack(fill="both", expand=True)
-configure_dpi_sizes()
-draw_notch()
-center_notch()
+if SHOW_NOTCH_OVERLAY:
+    canvas = tk.Canvas(
+        root,
+        width=notch_width,
+        height=notch_height,
+        bg=TRANSPARENT_BG,
+        highlightthickness=0,
+        bd=0,
+    )
+    canvas.pack(fill="both", expand=True)
+    configure_dpi_sizes()
+    draw_notch()
+    center_notch()
 create_primary_monitor_alert()
 create_second_monitor_alert()
 make_task_manager_app()
-show_overlay()
+if SHOW_NOTCH_OVERLAY:
+    show_overlay()
 root.after(500, make_task_manager_app)
 
 load_picker_cache()
+create_picker_window()
+if picker_items:
+    populate_picker()
 threading.Thread(target=timer_worker, daemon=True).start()
 threading.Thread(target=hotkey_worker, daemon=True).start()
+threading.Thread(target=right_shift_worker, daemon=True).start()
 threading.Thread(target=picker_refresh_worker, daemon=True).start()
 
 keep_on_top()
