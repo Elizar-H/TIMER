@@ -18,7 +18,6 @@ from timer_app.coordinates import (
 )
 from timer_app.crossout import (
     FLASH_URL,
-    RARITY_STYLES,
     RECYCLING_URL,
     build_flash_items,
     build_recycling_items,
@@ -48,6 +47,20 @@ from timer_app.picker.cache import (
     load_picker_cache as load_picker_cache_file,
     save_picker_cache as save_picker_cache_file,
 )
+from timer_app.picker.items import (
+    build_picker_display_rows as build_picker_display_rows_data,
+    count_real_picker_items,
+    format_picker_number,
+    get_picker_canvas_row_at as get_picker_canvas_row_at_data,
+    get_picker_item_cell_values,
+    get_picker_item_kind,
+    get_picker_item_row_indices as get_picker_item_row_indices_data,
+    get_picker_rarity_color,
+    get_price_for_rarity,
+    get_rarity_style,
+    has_real_picker_items,
+)
+from timer_app.picker.paste import normalize_game_search_text
 from timer_app.winapi import (
     MOUSEEVENTF_LEFTDOWN,
     MOUSEEVENTF_LEFTUP,
@@ -628,15 +641,6 @@ def update_picker_timer_label():
         picker_status_label.configure(text=get_picker_status_text())
 
 
-def has_real_picker_items(items):
-    return any(
-        isinstance(item, dict)
-        and not item.get("separator")
-        and not item.get("decor_prices")
-        for item in items or []
-    )
-
-
 def timed_call(label, timings, func, *args):
     started = time.perf_counter()
     try:
@@ -698,16 +702,6 @@ def merge_market_sources(primary_items, primary_market, secondary_items, seconda
     merged_market.update(secondary_market)
 
     return merged_items, merged_market
-
-
-def count_real_picker_items(items):
-    return sum(
-        1
-        for item in items or []
-        if isinstance(item, dict)
-        and not item.get("separator")
-        and not item.get("decor_prices")
-    )
 
 
 def log_picker_performance(timings, result):
@@ -1776,10 +1770,6 @@ def restore_picker_after_paste():
         pass
 
 
-def normalize_game_search_text(text):
-    return re.sub(r"[\u00a0\u202f\u2007]+", " ", str(text)).strip()
-
-
 def paste_item_name(name):
     global last_picker_paste_at, last_picker_paste_name, picker_target_hwnd
 
@@ -1895,70 +1885,6 @@ def position_picker_window():
     picker_window.geometry(f"{PICKER_WIDTH}x{total_height}{x:+d}{y:+d}")
 
 
-def get_picker_item_kind(item):
-    kind = item.get("kind")
-    if kind:
-        return kind
-    if "relative_spread" in item:
-        return "flash"
-    if item.get("profit") is not None:
-        return "decor"
-    return ""
-
-
-def format_picker_profit(item):
-    profit = item.get("profit", item.get("score"))
-    if profit is None:
-        return ""
-
-    sign = "+" if profit > 0 else ""
-    return f"{sign}{profit:.2f}"
-
-
-def format_picker_number(value):
-    if value is None:
-        return ""
-    try:
-        return f"{float(value):.2f}"
-    except Exception:
-        return ""
-
-
-def format_picker_int(value):
-    if value is None:
-        return ""
-    try:
-        return str(int(value))
-    except Exception:
-        return ""
-
-
-def format_picker_roi(item):
-    roi = item.get("roi")
-    if roi is None:
-        return ""
-    try:
-        sign = "+" if get_picker_item_kind(item) == "decor" and roi > 0 else ""
-        return f"{sign}{float(roi):.2f}%"
-    except Exception:
-        return ""
-
-
-def get_rarity_style(rarity_id):
-    try:
-        rarity_id = int(rarity_id)
-    except Exception:
-        return {"name": "", "short": "", "color": "#f0cf23"}
-    return RARITY_STYLES.get(
-        rarity_id,
-        {"name": "", "short": "", "color": "#f0cf23"},
-    )
-
-
-def get_picker_rarity_color(item):
-    return get_rarity_style(item.get("rarity_id"))["color"]
-
-
 def measure_picker_header(text, minimum):
     try:
         font = tkfont.Font(family="Segoe UI", size=8, weight="bold")
@@ -2021,10 +1947,6 @@ def get_picker_columns(kind):
     ]
     picker_columns_cache[kind] = columns
     return columns
-
-
-def get_price_for_rarity(prices, rarity_id):
-    return prices.get(rarity_id, prices.get(str(rarity_id)))
 
 
 def get_picker_canvas_font(size=9, weight="bold"):
@@ -2133,40 +2055,11 @@ def get_picker_render_signature():
 
 
 def build_picker_display_rows():
-    rows = []
-    y = 0
-    current_section = None
-    header_section = None
-
-    def add_row(row_type, height, **data):
-        nonlocal y
-        row = {"type": row_type, "y": y, "height": height, **data}
-        rows.append(row)
-        y += height
-
-    for item in picker_items:
-        if item.get("separator"):
-            add_row("separator", 34, text=item.get("section", ""))
-            current_section = item.get("section")
-            header_section = None
-            continue
-
-        if item.get("decor_prices"):
-            add_row("decor_prices", 42, prices=item.get("prices", {}))
-            continue
-
-        if item.get("section") != current_section:
-            add_row("separator", 34, text=item.get("section", ""))
-            current_section = item.get("section")
-            header_section = None
-
-        if current_section != header_section:
-            add_row("header", PICKER_HEADER_HEIGHT, kind=get_picker_item_kind(item))
-            header_section = current_section
-
-        add_row("item", PICKER_ROW_HEIGHT, item=item, kind=get_picker_item_kind(item))
-
-    return rows, y
+    return build_picker_display_rows_data(
+        picker_items,
+        PICKER_HEADER_HEIGHT,
+        PICKER_ROW_HEIGHT,
+    )
 
 
 def draw_picker_cell(
@@ -2319,28 +2212,6 @@ def draw_picker_header_canvas(row):
             padx=6,
         )
         x += column["width"]
-
-
-def get_picker_item_cell_values(item):
-    kind = get_picker_item_kind(item)
-    if kind == "flash":
-        return {
-            "name": item.get("name", ""),
-            "history_sell": format_picker_number(item.get("history_sell")),
-            "sell": format_picker_number(item.get("sell")),
-            "buy": format_picker_number(item.get("buy")),
-            "sell_orders": format_picker_int(item.get("sell_orders")),
-            "buy_orders": format_picker_int(item.get("buy_orders")),
-            "roi": format_picker_roi(item),
-            "profit": format_picker_profit(item),
-        }
-
-    return {
-        "name": item.get("name", ""),
-        "profit": format_picker_profit(item),
-        "price": format_picker_number(item.get("price")),
-        "roi": format_picker_roi(item),
-    }
 
 
 def get_picker_hover_bg(kind, key, default_bg):
@@ -2508,10 +2379,7 @@ def populate_picker(force=False):
 
 
 def get_picker_canvas_row_at(canvas_y):
-    for index, row in enumerate(picker_display_rows):
-        if row["y"] <= canvas_y < row["y"] + row["height"]:
-            return index, row
-    return None, None
+    return get_picker_canvas_row_at_data(picker_display_rows, canvas_y)
 
 
 def get_picker_canvas_item_at(event):
@@ -2537,11 +2405,7 @@ def on_picker_canvas_click(event):
 
 
 def get_picker_item_row_indices():
-    return [
-        index
-        for index, row in enumerate(picker_display_rows)
-        if row.get("type") == "item" and row.get("item")
-    ]
+    return get_picker_item_row_indices_data(picker_display_rows)
 
 
 def scroll_picker_row_into_view(row):

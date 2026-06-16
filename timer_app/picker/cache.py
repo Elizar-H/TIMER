@@ -2,18 +2,10 @@ from datetime import datetime
 import json
 
 from timer_app.paths import PICKER_CACHE_PATH
+from timer_app.picker.items import has_real_picker_items
 
 
 CACHE_VERSION = 14
-
-
-def _has_real_picker_items(items):
-    return any(
-        isinstance(item, dict)
-        and not item.get("separator")
-        and not item.get("decor_prices")
-        for item in items or []
-    )
 
 
 def load_picker_cache(path=PICKER_CACHE_PATH):
@@ -28,7 +20,7 @@ def load_picker_cache(path=PICKER_CACHE_PATH):
         return None
     if data.get("version") != CACHE_VERSION:
         return None
-    if not _has_real_picker_items(items):
+    if not has_real_picker_items(items):
         return None
 
     age_seconds = 0
@@ -44,7 +36,7 @@ def load_picker_cache(path=PICKER_CACHE_PATH):
 
 
 def save_picker_cache(items, path=PICKER_CACHE_PATH):
-    if not _has_real_picker_items(items):
+    if not has_real_picker_items(items):
         return
 
     with path.open("w", encoding="utf-8") as cache_file:
