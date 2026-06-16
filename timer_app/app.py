@@ -30,6 +30,7 @@ from timer_app.crossout import (
     read_crossoutcore_filters_cached,
 )
 from timer_app.game import GameActions
+from timer_app.hotkeys import HotkeyWorker
 from timer_app.log import append_log_line, log_error
 from timer_app.paths import COORDINATES_PATH, SETTINGS_PATH
 from timer_app.picker.cache import (
@@ -39,7 +40,6 @@ from timer_app.picker.cache import (
 from timer_app.winapi import (
     MOUSEEVENTF_LEFTDOWN,
     MOUSEEVENTF_LEFTUP,
-    MSG,
     POINT,
     SWP_NOACTIVATE,
     SWP_NOMOVE,
@@ -48,18 +48,14 @@ from timer_app.winapi import (
     SW_SHOWNOACTIVATE,
     VK_A,
     VK_BACK,
-    VK_DELETE,
     VK_DOWN,
     VK_END,
     VK_ESCAPE,
-    VK_LEFT,
     VK_RCONTROL,
     VK_RETURN,
     VK_RIGHT,
     VK_UP,
     VK_V,
-    WM_APP_HOTKEY_COMMAND,
-    WM_HOTKEY,
     enable_dpi_awareness,
     get_cursor_pos,
     get_screen_pixel_rgb,
@@ -187,11 +183,6 @@ PASTE_BEFORE_ENTER_DELAY = 0.040
 PASTE_ENTER_KEY_DELAY = 0.005
 PASTE_SEARCH_CLICKS = 2
 MOUSE_CLICK_DELAY = 0.003
-PICKER_HOTKEY_ID = 7311
-PICKER_OPEN_END_HOTKEY_ID = 7316
-PICKER_HOTKEY_VK = 0xC0
-WM_HOTKEY = 0x0312
-WM_APP_HOTKEY_COMMAND = 0x8001
 ITEM_PICKER_TITLE = "Crossout Item Picker"
 # Вид основной "челки"
 BASE_NOTCH_WIDTH = 100
@@ -447,22 +438,8 @@ def apply_settings():
 
 apply_settings()
 
-SALVAGE_HOTKEY_ID = 7317
-PICKER_UP_HOTKEY_ID = 7312
-PICKER_DOWN_HOTKEY_ID = 7313
-PICKER_RIGHT_HOTKEY_ID = 7314
-PICKER_LEFT_HOTKEY_ID = 7315
-PICKER_ACTION_HOTKEYS = (
-    (PICKER_UP_HOTKEY_ID, VK_UP, "picker_up"),
-    (PICKER_DOWN_HOTKEY_ID, VK_DOWN, "picker_down"),
-    (PICKER_RIGHT_HOTKEY_ID, VK_RIGHT, "picker_right"),
-    (PICKER_LEFT_HOTKEY_ID, VK_LEFT, "picker_left"),
-)
-
 q = queue.Queue()
-hotkey_q = queue.Queue()
-hotkey_command_q = queue.Queue()
-hotkey_thread_id = None
+hotkeys = HotkeyWorker(log_error)
 root = None
 canvas = None
 timer_text = None
@@ -503,7 +480,6 @@ picker_last_refresh_note = "кэш"
 picker_refresh_lock = threading.Lock()
 picker_fast_refresh_lock = threading.Lock()
 picker_refreshing = False
-picker_navigation_hotkeys_registered = False
 picker_actions_enabled = False
 right_shift_order_down = False
 right_ctrl_was_down = False
@@ -2767,24 +2743,6 @@ def create_picker_window():
     picker_hwnd = get_window_hwnd(picker_window)
 
 
-def wake_hotkey_worker():
-    if hotkey_thread_id:
-        try:
-            ctypes.windll.user32.PostThreadMessageW(
-                hotkey_thread_id,
-                WM_APP_HOTKEY_COMMAND,
-                0,
-                0,
-            )
-        except Exception:
-            pass
-
-
-def send_hotkey_worker_command(command):
-    hotkey_command_q.put(command)
-    wake_hotkey_worker()
-
-
 def set_picker_navigation_hotkeys(enabled):
     global picker_actions_enabled
 
@@ -2793,7 +2751,7 @@ def set_picker_navigation_hotkeys(enabled):
         return
 
     picker_actions_enabled = enabled
-    send_hotkey_worker_command("register_picker_nav" if enabled else "unregister_picker_nav")
+    hotkeys.set_picker_navigation(enabled)
 
 
 def should_enable_picker_navigation_hotkeys():
@@ -2860,80 +2818,6 @@ def show_picker(toggle=True):
             target=lambda: refresh_picker_and_repaint(force=True),
             daemon=True,
         ).start()
-
-
-def process_hotkey_worker_commands():
-    global picker_navigation_hotkeys_registered
-
-    while not hotkey_command_q.empty():
-        command = hotkey_command_q.get()
-
-        if command == "register_picker_nav" and not picker_navigation_hotkeys_registered:
-            registered_ids = []
-            for hotkey_id, vk, _event_name in PICKER_ACTION_HOTKEYS:
-                if ctypes.windll.user32.RegisterHotKey(None, hotkey_id, 0, vk):
-                    registered_ids.append(hotkey_id)
-                else:
-                    break
-
-            picker_navigation_hotkeys_registered = len(registered_ids) == len(PICKER_ACTION_HOTKEYS)
-            if not picker_navigation_hotkeys_registered:
-                for hotkey_id in registered_ids:
-                    ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
-                log_error("picker_nav_hotkey", "RegisterHotKey failed for picker action keys")
-
-        elif command == "unregister_picker_nav" and picker_navigation_hotkeys_registered:
-            for hotkey_id, _vk, _event_name in PICKER_ACTION_HOTKEYS:
-                ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
-            picker_navigation_hotkeys_registered = False
-
-
-def hotkey_worker():
-    global hotkey_thread_id
-
-    try:
-        hotkey_thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
-        if not ctypes.windll.user32.RegisterHotKey(
-            None,
-            PICKER_HOTKEY_ID,
-            0,
-            PICKER_HOTKEY_VK,
-        ):
-            log_error("hotkey", "RegisterHotKey failed for ё / `")
-            return
-        if not ctypes.windll.user32.RegisterHotKey(
-            None,
-            PICKER_OPEN_END_HOTKEY_ID,
-            0,
-            VK_END,
-        ):
-            log_error("hotkey", "RegisterHotKey failed for End")
-        if not ctypes.windll.user32.RegisterHotKey(
-            None,
-            SALVAGE_HOTKEY_ID,
-            0,
-            VK_DELETE,
-        ):
-            log_error("hotkey", "RegisterHotKey failed for Delete")
-
-        msg = MSG()
-        while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-            if msg.message == WM_APP_HOTKEY_COMMAND:
-                process_hotkey_worker_commands()
-            elif msg.message == WM_HOTKEY:
-                if msg.wParam == PICKER_HOTKEY_ID:
-                    hotkey_q.put("picker")
-                elif msg.wParam == PICKER_OPEN_END_HOTKEY_ID:
-                    hotkey_q.put("picker_end_open")
-                elif msg.wParam == SALVAGE_HOTKEY_ID:
-                    hotkey_q.put("salvage_toggle")
-                else:
-                    for hotkey_id, _vk, event_name in PICKER_ACTION_HOTKEYS:
-                        if msg.wParam == hotkey_id:
-                            hotkey_q.put(event_name)
-                            break
-    except Exception as e:
-        log_error("hotkey", f"Hotkey worker failed: {e}")
 
 
 def right_shift_worker():
@@ -3020,8 +2904,7 @@ def right_shift_worker():
 def check_hotkeys():
     close_picker_if_target_gone()
 
-    while not hotkey_q.empty():
-        event = hotkey_q.get()
+    for event in hotkeys.drain_events():
         if event == "picker":
             show_picker()
         elif event == "picker_end_open":
@@ -3468,7 +3351,7 @@ def main():
     if picker_items:
         populate_picker()
     threading.Thread(target=timer_worker, daemon=True).start()
-    threading.Thread(target=hotkey_worker, daemon=True).start()
+    hotkeys.start()
     threading.Thread(target=right_shift_worker, daemon=True).start()
     threading.Thread(target=picker_refresh_worker, daemon=True).start()
 
