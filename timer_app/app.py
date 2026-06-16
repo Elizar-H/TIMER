@@ -32,6 +32,17 @@ from timer_app.crossout import (
 from timer_app.game import GameActions
 from timer_app.hotkeys import HotkeyWorker
 from timer_app.log import append_log_line, log_error
+from timer_app.overlays import (
+    apply_window_region as apply_overlay_window_region,
+    calculate_alert_pulse,
+    configure_notch_dpi_sizes,
+    configure_task_manager_app,
+    create_monitor_alert_window,
+    create_notch_items,
+    get_pulse_alpha,
+    set_canvas_items_fill,
+    show_overlay_window,
+)
 from timer_app.paths import COORDINATES_PATH, SETTINGS_PATH
 from timer_app.picker.cache import (
     load_picker_cache as load_picker_cache_file,
@@ -73,7 +84,6 @@ from timer_app.windows import (
     apply_no_focus_clickthrough,
     find_game_window,
     force_foreground_window,
-    geometry_from_rect,
     get_foreground_hwnd,
     get_hwnd_pixel_rgb,
     get_hwnd_ratio_point,
@@ -531,10 +541,6 @@ TODO_EXTRACT_LATER = (
     "get_or_restore_game_hwnd",
     "keep_picker_on_top",
     "keep_on_top",
-    "make_task_manager_app",
-    "show_overlay",
-    "apply_window_region",
-    "configure_dpi_sizes",
 )
 
 
@@ -1004,30 +1010,7 @@ def update_colors():
 
 
 def get_alert_pulse():
-    cycle = sum(duration for _, duration, _ in ALERT_PULSE_PATTERN)
-    position = time.monotonic() % cycle
-
-    for mode, duration, peak in ALERT_PULSE_PATTERN:
-        if position < duration:
-            if duration <= 0:
-                return peak
-
-            progress = position / duration
-            eased = progress * progress * (3 - 2 * progress)
-            if mode == "rise":
-                return peak * eased
-            if mode == "fall":
-                return peak * (1 - eased)
-            return peak
-
-        position -= duration
-
-    return 0
-
-
-def get_pulse_alpha(min_alpha, max_alpha, pulse):
-    pulse = max(0, min(1, pulse))
-    return min_alpha + (max_alpha - min_alpha) * pulse
+    return calculate_alert_pulse(ALERT_PULSE_PATTERN)
 
 
 def set_notch_colors(bg, fg, alpha):
@@ -1114,8 +1097,7 @@ def set_second_monitor_border_color(color):
     if second_monitor_canvas is None:
         return
 
-    for item in second_monitor_border_items:
-        second_monitor_canvas.itemconfig(item, fill=color)
+    set_canvas_items_fill(second_monitor_canvas, second_monitor_border_items, color)
 
 
 def clear_dead_picker_targets():
@@ -3011,23 +2993,15 @@ def keep_on_top():
 
 
 def make_task_manager_app():
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
-    except Exception:
-        pass
-
-    try:
-        apply_no_focus_clickthrough(root, show_in_task_manager=False)
-    except Exception:
-        pass
+    configure_task_manager_app(root, APP_ID)
 
 
 def show_overlay():
-    show_tk_window_no_activate(root)
+    show_overlay_window(root)
 
 
 def apply_window_region():
-    pass
+    apply_overlay_window_region(root)
 
 
 def create_primary_monitor_alert():
@@ -3038,83 +3012,20 @@ def create_primary_monitor_alert():
         log_error("monitor", "Primary monitor alert was not created: no monitor rect.")
         return
 
-    left, top, right, bottom = primary_monitor_rect
-    width = right - left
-    height = bottom - top
-    scale = max(1.0, root.winfo_fpixels("1i") / 96)
-    thickness = round(PRIMARY_MONITOR_BORDER_THICKNESS * scale)
-
-    primary_monitor_alert = tk.Toplevel(root)
-    primary_monitor_alert.withdraw()
-    primary_monitor_alert.title("Crossout Timer Primary Monitor Alert")
-    primary_monitor_alert.overrideredirect(True)
-    primary_monitor_alert.configure(bg=TRANSPARENT_BG)
-    primary_monitor_alert.attributes("-transparentcolor", TRANSPARENT_BG)
-    primary_monitor_alert.attributes("-topmost", True)
-    primary_monitor_alert.attributes("-alpha", PRIMARY_MONITOR_ALPHA)
-    primary_monitor_alert.geometry(geometry_from_rect(primary_monitor_rect))
-
-    primary_monitor_canvas = tk.Canvas(
-        primary_monitor_alert,
-        width=width,
-        height=height,
-        bg=TRANSPARENT_BG,
-        highlightthickness=0,
-        bd=0,
+    primary_monitor_alert, primary_monitor_canvas, border_items = create_monitor_alert_window(
+        root,
+        primary_monitor_rect,
+        "Crossout Timer Primary Monitor Alert",
+        TRANSPARENT_BG,
+        ALERT_BG,
+        PRIMARY_MONITOR_ALPHA,
+        PRIMARY_MONITOR_BORDER_THICKNESS,
+        log_error,
+        "primary_monitor_window",
+        "Primary monitor window setup failed",
     )
-    primary_monitor_canvas.pack(fill="both", expand=True)
-    primary_monitor_border_items.extend(
-        [
-            primary_monitor_canvas.create_rectangle(
-                0,
-                0,
-                width,
-                thickness,
-                fill=ALERT_BG,
-                outline="",
-            ),
-            primary_monitor_canvas.create_rectangle(
-                0,
-                height - thickness,
-                width,
-                height,
-                fill=ALERT_BG,
-                outline="",
-            ),
-            primary_monitor_canvas.create_rectangle(
-                0,
-                thickness,
-                thickness,
-                height - thickness,
-                fill=ALERT_BG,
-                outline="",
-            ),
-            primary_monitor_canvas.create_rectangle(
-                width - thickness,
-                thickness,
-                width,
-                height - thickness,
-                fill=ALERT_BG,
-                outline="",
-            ),
-        ]
-    )
-    primary_monitor_alert.update_idletasks()
-
-    try:
-        apply_no_focus_clickthrough(primary_monitor_alert)
-        hwnd = get_window_hwnd(primary_monitor_alert)
-        ctypes.windll.user32.SetWindowPos(
-            hwnd,
-            -1,
-            left,
-            top,
-            width,
-            height,
-            SWP_NOACTIVATE,
-        )
-    except Exception as e:
-        log_error("primary_monitor_window", f"Primary monitor window setup failed: {e}")
+    primary_monitor_border_items.clear()
+    primary_monitor_border_items.extend(border_items)
 
 
 def create_second_monitor_alert():
@@ -3125,84 +3036,20 @@ def create_second_monitor_alert():
         log_error("monitor", "Second monitor alert was not created: no monitor rect.")
         return
 
-    left, top, right, bottom = second_monitor_rect
-    width = right - left
-    height = bottom - top
-    scale = max(1.0, root.winfo_fpixels("1i") / 96)
-    thickness = round(SECOND_MONITOR_BORDER_THICKNESS * scale)
-
-    second_monitor_alert = tk.Toplevel(root)
-    second_monitor_alert.withdraw()
-    second_monitor_alert.title("Crossout Timer Second Monitor Alert")
-    second_monitor_alert.overrideredirect(True)
-    second_monitor_alert.configure(bg=TRANSPARENT_BG)
-    second_monitor_alert.attributes("-transparentcolor", TRANSPARENT_BG)
-    second_monitor_alert.attributes("-topmost", True)
-    second_monitor_alert.attributes("-alpha", SECOND_MONITOR_ALPHA)
-    second_monitor_alert.geometry(geometry_from_rect(second_monitor_rect))
-
-    second_monitor_canvas = tk.Canvas(
-        second_monitor_alert,
-        width=width,
-        height=height,
-        bg=TRANSPARENT_BG,
-        highlightthickness=0,
-        bd=0,
+    second_monitor_alert, second_monitor_canvas, border_items = create_monitor_alert_window(
+        root,
+        second_monitor_rect,
+        "Crossout Timer Second Monitor Alert",
+        TRANSPARENT_BG,
+        ALERT_BG,
+        SECOND_MONITOR_ALPHA,
+        SECOND_MONITOR_BORDER_THICKNESS,
+        log_error,
+        "second_monitor_window",
+        "Second monitor window setup failed",
     )
-    second_monitor_canvas.pack(fill="both", expand=True)
-    second_monitor_border_items.extend(
-        [
-            second_monitor_canvas.create_rectangle(
-                0,
-                0,
-                width,
-                thickness,
-                fill=ALERT_BG,
-                outline="",
-            ),
-            second_monitor_canvas.create_rectangle(
-                0,
-                height - thickness,
-                width,
-                height,
-                fill=ALERT_BG,
-                outline="",
-            ),
-            second_monitor_canvas.create_rectangle(
-                0,
-                thickness,
-                thickness,
-                height - thickness,
-                fill=ALERT_BG,
-                outline="",
-            ),
-            second_monitor_canvas.create_rectangle(
-                width - thickness,
-                thickness,
-                width,
-                height - thickness,
-                fill=ALERT_BG,
-                outline="",
-            ),
-        ]
-    )
-    second_monitor_alert.update_idletasks()
-
-    try:
-        apply_no_focus_clickthrough(second_monitor_alert)
-        hwnd = get_window_hwnd(second_monitor_alert)
-        left, top, right, bottom = second_monitor_rect
-        ctypes.windll.user32.SetWindowPos(
-            hwnd,
-            -1,
-            left,
-            top,
-            right - left,
-            bottom - top,
-            SWP_NOACTIVATE,
-        )
-    except Exception as e:
-        log_error("second_monitor_window", f"Second monitor window setup failed: {e}")
+    second_monitor_border_items.clear()
+    second_monitor_border_items.extend(border_items)
 
 
 def center_notch():
@@ -3214,89 +3061,37 @@ def center_notch():
 def configure_dpi_sizes():
     global font_pixels, notch_height, notch_radius, notch_width, notch_x, overlay_width
 
-    try:
-        dpi = ctypes.windll.user32.GetDpiForWindow(root.winfo_id())
-    except Exception:
-        try:
-            dpi = ctypes.windll.user32.GetDpiForSystem()
-        except Exception:
-            dpi = root.winfo_fpixels("1i")
-
-    scale = max(1.0, dpi / 96)
-    notch_width = round(BASE_NOTCH_WIDTH * scale)
-    notch_height = round(BASE_NOTCH_HEIGHT * scale)
-    notch_radius = round(BASE_NOTCH_RADIUS * scale)
-    font_pixels = round(BASE_FONT_PIXELS * scale)
-    overlay_width = root.winfo_screenwidth()
-    notch_x = (overlay_width - notch_width) // 2
-    canvas.config(width=overlay_width, height=notch_height)
-
-
-def rounded_bottom_rect_points(x, y, width, height, radius, steps=16):
-    radius = min(radius, width // 2, height)
-    x1 = x
-    y1 = y
-    x2 = x + width
-    y2 = y + height
-    points = [x1, y1, x2, y1, x2, y2 - radius]
-
-    right_cx = x2 - radius
-    corner_cy = y2 - radius
-    for step in range(steps + 1):
-        angle = math.radians(step * 90 / steps)
-        points.extend(
-            [
-                round(right_cx + radius * math.cos(angle)),
-                round(corner_cy + radius * math.sin(angle)),
-            ]
-        )
-
-    left_cx = x1 + radius
-    points.extend([left_cx, y2])
-    for step in range(steps + 1):
-        angle = math.radians(90 + step * 90 / steps)
-        points.extend(
-            [
-                round(left_cx + radius * math.cos(angle)),
-                round(corner_cy + radius * math.sin(angle)),
-            ]
-        )
-
-    points.extend([x1, y1])
-    return points
+    (
+        overlay_width,
+        notch_x,
+        notch_width,
+        notch_height,
+        notch_radius,
+        font_pixels,
+    ) = configure_notch_dpi_sizes(
+        root,
+        canvas,
+        BASE_NOTCH_WIDTH,
+        BASE_NOTCH_HEIGHT,
+        BASE_NOTCH_RADIUS,
+        BASE_FONT_PIXELS,
+    )
 
 
 def draw_notch():
-    global alert_strip, timer_text
+    global alert_strip, notch_items, timer_text
 
-    alert_strip = canvas.create_rectangle(
-        0,
-        0,
+    alert_strip, notch_items, timer_text = create_notch_items(
+        canvas,
         overlay_width,
+        notch_x,
+        notch_width,
         notch_height,
-        fill=ALERT_BG,
-        outline="",
-        state="hidden",
-    )
-    notch_items.append(
-        canvas.create_polygon(
-            rounded_bottom_rect_points(
-                notch_x,
-                0,
-                notch_width,
-                notch_height,
-                notch_radius,
-            ),
-            fill=NORMAL_BG,
-            outline="",
-        )
-    )
-    timer_text = canvas.create_text(
-        notch_x + notch_width // 2,
-        notch_height // 2,
-        text="--:--",
-        fill=NORMAL_FG,
-        font=("Segoe UI", -font_pixels),
+        notch_radius,
+        ALERT_BG,
+        NORMAL_BG,
+        NORMAL_FG,
+        font_pixels,
     )
 
 
