@@ -18,6 +18,12 @@ from timer_app.actions.market import (
     STAGE_OPENING_CARD,
     STAGE_QUANTITY,
 )
+from timer_app.actions.salvage import (
+    has_cursor_moved,
+    remaining_cooldown_seconds,
+    sleep_with_stop as salvage_sleep_with_stop,
+    wait_while_mouse_button_held,
+)
 from timer_app.config import DEFAULT_SETTINGS, load_settings, setting
 from timer_app.coordinates import (
     DEFAULT_COORDINATES,
@@ -1234,9 +1240,11 @@ def salvage_cursor_moved_by_user():
     if current_pos is None:
         return False
 
-    dx = abs(current_pos[0] - salvage_expected_cursor_pos[0])
-    dy = abs(current_pos[1] - salvage_expected_cursor_pos[1])
-    return dx > SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS or dy > SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS
+    return has_cursor_moved(
+        salvage_expected_cursor_pos,
+        current_pos,
+        SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS,
+    )
 
 
 def hold_left_mouse(seconds, stop_event=None, mouse_guard=False):
@@ -1244,15 +1252,13 @@ def hold_left_mouse(seconds, stop_event=None, mouse_guard=False):
         return False
 
     try:
-        end_at = time.monotonic() + max(0, seconds)
-        while time.monotonic() < end_at:
-            if stop_event is not None and stop_event.is_set():
-                return False
-            if mouse_guard and salvage_cursor_moved_by_user():
-                mark_salvage_mouse_cancel(stop_event)
-                return False
-            time.sleep(0.01)
-        return True
+        return wait_while_mouse_button_held(
+            seconds,
+            stop_event=stop_event,
+            mouse_guard=mouse_guard,
+            cursor_moved=salvage_cursor_moved_by_user,
+            on_mouse_cancel=lambda: mark_salvage_mouse_cancel(stop_event),
+        )
     finally:
         send_mouse_button(MOUSEEVENTF_LEFTUP)
 
@@ -1502,15 +1508,13 @@ def handle_right_ctrl_escape():
 
 
 def sleep_with_stop(seconds, stop_event, mouse_guard=False):
-    end_at = time.monotonic() + max(0, seconds)
-    while time.monotonic() < end_at:
-        if stop_event.is_set():
-            return False
-        if mouse_guard and salvage_cursor_moved_by_user():
-            mark_salvage_mouse_cancel(stop_event)
-            return False
-        time.sleep(min(0.02, max(0, end_at - time.monotonic())))
-    return not stop_event.is_set()
+    return salvage_sleep_with_stop(
+        seconds,
+        stop_event,
+        mouse_guard=mouse_guard,
+        cursor_moved=salvage_cursor_moved_by_user,
+        on_mouse_cancel=lambda: mark_salvage_mouse_cancel(stop_event),
+    )
 
 
 def salvage_click(point_name, stop_event, right=False):
@@ -1543,9 +1547,11 @@ def salvage_right_click_item(point_name, stop_event):
     note_salvage_cursor_pos()
     if not sleep_with_stop(SALVAGE_ITEM_HOVER_DELAY_SECONDS, stop_event, mouse_guard=True):
         return False
-    since_last_right_click = time.monotonic() - salvage_last_item_right_click_at
-    if since_last_right_click < SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS:
-        wait_time = SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS - since_last_right_click
+    wait_time = remaining_cooldown_seconds(
+        salvage_last_item_right_click_at,
+        SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS,
+    )
+    if wait_time:
         if not sleep_with_stop(wait_time, stop_event, mouse_guard=True):
             return False
     if not send_mouse_right_click(MOUSE_CLICK_DELAY):
