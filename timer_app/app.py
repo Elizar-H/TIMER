@@ -10,6 +10,14 @@ import re
 import time
 import tkinter as tk
 import tkinter.font as tkfont
+from timer_app.actions.market import (
+    MarketActionState,
+    STAGE_BUY,
+    STAGE_OPEN_CARD,
+    STAGE_OPENING_BUY_DIALOG,
+    STAGE_OPENING_CARD,
+    STAGE_QUANTITY,
+)
 from timer_app.config import DEFAULT_SETTINGS, load_settings, setting
 from timer_app.coordinates import (
     DEFAULT_COORDINATES,
@@ -529,9 +537,7 @@ salvage_running = False
 salvage_stop_event = threading.Event()
 salvage_expected_cursor_pos = None
 salvage_last_item_right_click_at = 0
-market_action_stage = "open_card"
-market_action_stage_ready_at = 0
-market_action_stage_updated_at = 0
+market_action_state = MarketActionState(MARKET_ACTION_STAGE_MAX_AGE_SECONDS)
 picker_render_signature = None
 last_picker_paste_at = 0
 last_picker_paste_name = None
@@ -1337,9 +1343,9 @@ def is_game_point_visible(point_name):
 
 def detect_market_action_stage():
     if is_game_point_visible("market.order_button"):
-        return "quantity"
+        return STAGE_QUANTITY
     if is_game_point_visible("market.buy_button"):
-        return "buy"
+        return STAGE_BUY
     return None
 
 
@@ -1377,35 +1383,15 @@ def open_game_market_details():
 
 
 def set_market_action_stage(stage, ready_at=0):
-    global market_action_stage, market_action_stage_ready_at, market_action_stage_updated_at
-
-    market_action_stage = stage
-    market_action_stage_ready_at = ready_at
-    market_action_stage_updated_at = time.monotonic()
+    market_action_state.set(stage, ready_at)
 
 
 def reset_market_action_stage():
-    set_market_action_stage("open_card", 0)
+    market_action_state.reset()
 
 
 def get_market_action_stage():
-    global market_action_stage, market_action_stage_ready_at
-
-    now = time.monotonic()
-    if (
-        market_action_stage != "open_card"
-        and market_action_stage_updated_at
-        and now - market_action_stage_updated_at > MARKET_ACTION_STAGE_MAX_AGE_SECONDS
-    ):
-        reset_market_action_stage()
-        return market_action_stage
-
-    if market_action_stage == "opening_card" and now >= market_action_stage_ready_at:
-        set_market_action_stage("buy", 0)
-    elif market_action_stage == "opening_buy_dialog" and now >= market_action_stage_ready_at:
-        set_market_action_stage("quantity", 0)
-
-    return market_action_stage
+    return market_action_state.get()
 
 
 def handle_market_action_right():
@@ -1414,25 +1400,25 @@ def handle_market_action_right():
     now = time.monotonic()
     detected_stage = detect_market_action_stage()
 
-    if detected_stage == "quantity":
-        right_arrow_last_action_stage = "quantity"
-        set_market_action_stage("quantity", 0)
+    if detected_stage == STAGE_QUANTITY:
+        right_arrow_last_action_stage = STAGE_QUANTITY
+        set_market_action_stage(STAGE_QUANTITY, 0)
         return increase_market_item_quantity()
 
-    if detected_stage == "buy":
-        right_arrow_last_action_stage = "buy"
+    if detected_stage == STAGE_BUY:
+        right_arrow_last_action_stage = STAGE_BUY
         ok = buy_current_market_item()
         if ok:
-            set_market_action_stage("opening_buy_dialog", now + GAME_BUY_TO_QUANTITY_DELAY_SECONDS)
+            set_market_action_stage(STAGE_OPENING_BUY_DIALOG, now + GAME_BUY_TO_QUANTITY_DELAY_SECONDS)
         return ok
 
-    if get_market_action_stage() == "opening_buy_dialog":
+    if get_market_action_stage() == STAGE_OPENING_BUY_DIALOG:
         return False
 
-    right_arrow_last_action_stage = "open_card"
+    right_arrow_last_action_stage = STAGE_OPEN_CARD
     ok = open_selected_market_card()
-    if ok and market_action_stage != "opening_card":
-        set_market_action_stage("opening_card", now + GAME_OPEN_TO_BUY_DELAY_SECONDS)
+    if ok and market_action_state.stage != STAGE_OPENING_CARD:
+        set_market_action_stage(STAGE_OPENING_CARD, now + GAME_OPEN_TO_BUY_DELAY_SECONDS)
     return ok
 
 
@@ -1510,7 +1496,7 @@ def finish_picker_end_press():
 
 
 def handle_right_ctrl_escape():
-    if detect_market_action_stage() != "quantity":
+    if detect_market_action_stage() != STAGE_QUANTITY:
         return False
     return decrease_market_item_quantity()
 
@@ -1672,7 +1658,7 @@ def set_order_button_hold(is_down):
         return True
 
     if is_down:
-        if detect_market_action_stage() != "quantity":
+        if detect_market_action_stage() != STAGE_QUANTITY:
             return False
         if not game.move_to("market.order_button"):
             return False
@@ -2714,8 +2700,11 @@ def right_shift_worker():
                 held_for = time.monotonic() - right_arrow_press_at
                 if held_for >= RIGHT_ARROW_HOLD_SECONDS and get_picker_action_hwnd():
                     stage = detect_market_action_stage()
-                    if stage == "quantity":
-                        if right_arrow_last_action_stage == "quantity" and not right_arrow_hold_compensated:
+                    if stage == STAGE_QUANTITY:
+                        if (
+                            right_arrow_last_action_stage == STAGE_QUANTITY
+                            and not right_arrow_hold_compensated
+                        ):
                             decrease_market_item_quantity()
                             right_arrow_hold_compensated = True
                         if set_order_button_hold(True):
