@@ -1,127 +1,152 @@
 {
   "picker.window_anchor": {
-    "x_ratio": 0.292,
-    "y_ratio": 0.147,
+    "x": 1121,
+    "y": 318,
     "description": "Picker window anchor near the in-game search area."
   },
   "picker.search_field": {
-    "x_ratio": 0.245,
-    "y_ratio": 0.17,
+    "x": 941,
+    "y": 367,
     "description": "Click point inside the in-game search field."
   },
   "market.open_card": {
-    "x_ratio": 0.54,
-    "y_ratio": 0.281,
+    "x": 2074,
+    "y": 607,
     "description": "Open the selected market item card."
   },
   "market.buy_button": {
-    "x_ratio": 0.069,
-    "y_ratio": 0.904,
+    "x": 265,
+    "y": 1953,
     "description": "Buy button on a market item card."
   },
   "market.order_button": {
-    "x_ratio": 0.515,
-    "y_ratio": 0.653,
+    "x": 1978,
+    "y": 1410,
     "description": "Create order button in the market quantity dialog."
   },
   "market.quantity_plus": {
-    "x_ratio": 0.523,
-    "y_ratio": 0.512,
+    "x": 2008,
+    "y": 1106,
     "description": "Increase market order quantity."
   },
   "market.quantity_minus": {
-    "x_ratio": 0.469,
-    "y_ratio": 0.512,
+    "x": 1801,
+    "y": 1106,
     "description": "Decrease market order quantity."
   },
   "market.market_tab": {
-    "x_ratio": 0.383,
-    "y_ratio": 0.033,
+    "x": 1471,
+    "y": 71,
     "description": "Market tab in the item details view."
   },
   "market.details_tab": {
-    "x_ratio": 0.421,
-    "y_ratio": 0.088,
+    "x": 1617,
+    "y": 190,
     "description": "Details tab in the market view."
   },
   "market.sell_button": {
-    "x_ratio": 0.36692708333333335,
-    "y_ratio": 0.9069444444444444,
+    "x": 1409,
+    "y": 1959,
     "description": "Sell button on the market item screen."
   },
   "market.sell_price_field": {
-    "x_ratio": 0.4947916666666667,
-    "y_ratio": 0.3763888888888889,
+    "x": 1900,
+    "y": 813,
     "description": "Price field in the sell dialog."
   },
   "market.sell_all_button": {
-    "x_ratio": 0.5776041666666667,
-    "y_ratio": 0.5509259259259259,
+    "x": 2218,
+    "y": 1190,
     "description": "All quantity button in the sell dialog."
   },
   "market.sell_confirm_button": {
-    "x_ratio": 0.5174479166666667,
-    "y_ratio": 0.6944444444444444,
+    "x": 1987,
+    "y": 1500,
     "description": "Confirm button in the sell dialog."
   },
   "salvage.storage_tab": {
-    "x_ratio": 0.43072916666666666,
-    "y_ratio": 0.03657407407407407,
+    "x": 1654,
+    "y": 79,
     "description": "Storage tab before salvage actions."
   },
   "salvage.details_tab": {
-    "x_ratio": 0.32708333333333334,
-    "y_ratio": 0.0837962962962963,
+    "x": 1256,
+    "y": 181,
     "description": "Details tab before salvage actions."
   },
   "salvage.pre_decor_category": {
-    "x_ratio": 0.4239583333333333,
-    "y_ratio": 0.1685185185185185,
+    "x": 1628,
+    "y": 364,
     "description": "TODO_NAMING_REVIEW: preliminary click before selecting decor category."
   },
   "salvage.decor_category": {
-    "x_ratio": 0.34140625,
-    "y_ratio": 0.1685185185185185,
+    "x": 1311,
+    "y": 364,
     "description": "Decor category in storage."
   },
   "salvage.sort_dropdown": {
-    "x_ratio": 0.8903645833333333,
-    "y_ratio": 0.1699074074074074,
+    "x": 3419,
+    "y": 367,
     "description": "Sort dropdown in storage."
   },
   "salvage.sort_new_option": {
-    "x_ratio": 0.8765625,
-    "y_ratio": 0.4351851851851852,
+    "x": 3366,
+    "y": 940,
     "description": "Sort by newest option."
   },
   "salvage.sort_type_option": {
-    "x_ratio": 0.8778645833333334,
-    "y_ratio": 0.2152777777777778,
+    "x": 3371,
+    "y": 465,
     "description": "Sort by type option."
   },
   "salvage.first_item": {
-    "x_ratio": 0.06692708333333333,
-    "y_ratio": 0.3199074074074074,
+    "x": 257,
+    "y": 691,
     "description": "First salvageable item in the storage list."
   },
   "salvage.selected_item": {
-    "x_ratio": 0.06692708333333333,
-    "y_ratio": 0.3199074074074074,
+    "x": 257,
+    "y": 691,
     "description": "Selected salvage item in the storage list."
   },
   "salvage.context_disassemble": {
-    "x_ratio": 0.059895833333333336,
-    "y_ratio": 0.6064814814814815,
+    "x": 230,
+    "y": 1310,
     "description": "Disassemble action in the item context menu."
   },
+  "salvage.context_disassemble_probe_top": {
+    "x": 271,
+    "y": 1221,
+    "description": "White pixel probe for the upper disassemble menu option."
+  },
+  "salvage.context_disassemble_option_top": {
+    "x": 230,
+    "y": 1315,
+    "description": "Upper disassemble menu option selected when the upper probe is white."
+  },
+  "salvage.context_disassemble_probe_bottom": {
+    "x": 271,
+    "y": 1317,
+    "description": "White pixel probe for the lower disassemble menu option."
+  },
+  "salvage.context_disassemble_option_bottom": {
+    "x": 231,
+    "y": 1402,
+    "description": "Lower disassemble menu option selected when the lower probe is white."
+  },
   "salvage.all_button": {
-    "x_ratio": 0.5036458333333333,
-    "y_ratio": 0.47175925925925927,
+    "x": 1934,
+    "y": 1019,
     "description": "All button in the disassemble dialog."
   },
   "salvage.confirm_button": {
-    "x_ratio": 0.5002604166666667,
-    "y_ratio": 0.6800925925925926,
+    "x": 1921,
+    "y": 1469,
     "description": "Confirm button in the disassemble dialog."
+  },
+  "salvage.stop_finish_click": {
+    "x": 1519,
+    "y": 362,
+    "description": "TODO_NAMING_REVIEW: P014 final click after stopping salvage."
   }
 }

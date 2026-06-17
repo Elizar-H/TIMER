@@ -2,132 +2,169 @@ import json
 from copy import deepcopy
 
 
+DEFAULT_PIXEL_BASE_WIDTH = 3840
+DEFAULT_PIXEL_BASE_HEIGHT = 2160
+
+
+def _pixel_point(x, y, description):
+    return {
+        "x": x,
+        "y": y,
+        "description": description,
+    }
+
+
 DEFAULT_COORDINATES = {
-    "picker.window_anchor": {
-        "x_ratio": 0.292,
-        "y_ratio": 0.147,
-        "description": "Picker window anchor near the in-game search area.",
-    },
-    "picker.search_field": {
-        "x_ratio": 0.245,
-        "y_ratio": 0.17,
-        "description": "Click point inside the in-game search field.",
-    },
-    "market.open_card": {
-        "x_ratio": 0.54,
-        "y_ratio": 0.281,
-        "description": "Open the selected market item card.",
-    },
-    "market.buy_button": {
-        "x_ratio": 0.069,
-        "y_ratio": 0.904,
-        "description": "Buy button on a market item card.",
-    },
-    "market.order_button": {
-        "x_ratio": 0.515,
-        "y_ratio": 0.653,
-        "description": "Create order button in the market quantity dialog.",
-    },
-    "market.quantity_plus": {
-        "x_ratio": 0.523,
-        "y_ratio": 0.512,
-        "description": "Increase market order quantity.",
-    },
-    "market.quantity_minus": {
-        "x_ratio": 0.469,
-        "y_ratio": 0.512,
-        "description": "Decrease market order quantity.",
-    },
-    "market.market_tab": {
-        "x_ratio": 0.383,
-        "y_ratio": 0.033,
-        "description": "Market tab in the item details view.",
-    },
-    "market.details_tab": {
-        "x_ratio": 0.421,
-        "y_ratio": 0.088,
-        "description": "Details tab in the market view.",
-    },
-    "market.sell_button": {
-        "x_ratio": 0.36692708333333335,
-        "y_ratio": 0.9069444444444444,
-        "description": "Sell button on the market item screen.",
-    },
-    "market.sell_price_field": {
-        "x_ratio": 0.4947916666666667,
-        "y_ratio": 0.3763888888888889,
-        "description": "Price field in the sell dialog.",
-    },
-    "market.sell_all_button": {
-        "x_ratio": 0.5776041666666667,
-        "y_ratio": 0.5509259259259259,
-        "description": "All quantity button in the sell dialog.",
-    },
-    "market.sell_confirm_button": {
-        "x_ratio": 0.5174479166666667,
-        "y_ratio": 0.6944444444444444,
-        "description": "Confirm button in the sell dialog.",
-    },
-    "salvage.storage_tab": {
-        "x_ratio": 0.43072916666666666,
-        "y_ratio": 0.03657407407407407,
-        "description": "Storage tab before salvage actions.",
-    },
-    "salvage.details_tab": {
-        "x_ratio": 0.32708333333333334,
-        "y_ratio": 0.0837962962962963,
-        "description": "Details tab before salvage actions.",
-    },
-    "salvage.pre_decor_category": {
-        "x_ratio": 0.4239583333333333,
-        "y_ratio": 0.1685185185185185,
-        "description": "TODO_NAMING_REVIEW: preliminary click before selecting decor category.",
-    },
-    "salvage.decor_category": {
-        "x_ratio": 0.34140625,
-        "y_ratio": 0.1685185185185185,
-        "description": "Decor category in storage.",
-    },
-    "salvage.sort_dropdown": {
-        "x_ratio": 0.8903645833333333,
-        "y_ratio": 0.1699074074074074,
-        "description": "Sort dropdown in storage.",
-    },
-    "salvage.sort_new_option": {
-        "x_ratio": 0.8765625,
-        "y_ratio": 0.4351851851851852,
-        "description": "Sort by newest option.",
-    },
-    "salvage.sort_type_option": {
-        "x_ratio": 0.8778645833333334,
-        "y_ratio": 0.2152777777777778,
-        "description": "Sort by type option.",
-    },
-    "salvage.first_item": {
-        "x_ratio": 0.06692708333333333,
-        "y_ratio": 0.3199074074074074,
-        "description": "First salvageable item in the storage list.",
-    },
-    "salvage.selected_item": {
-        "x_ratio": 0.06692708333333333,
-        "y_ratio": 0.3199074074074074,
-        "description": "Selected salvage item in the storage list.",
-    },
-    "salvage.context_disassemble": {
-        "x_ratio": 0.059895833333333336,
-        "y_ratio": 0.6064814814814815,
-        "description": "Disassemble action in the item context menu.",
-    },
-    "salvage.all_button": {
-        "x_ratio": 0.5036458333333333,
-        "y_ratio": 0.47175925925925927,
-        "description": "All button in the disassemble dialog.",
-    },
-    "salvage.confirm_button": {
-        "x_ratio": 0.5002604166666667,
-        "y_ratio": 0.6800925925925926,
-        "description": "Confirm button in the disassemble dialog.",
-    },
+    "picker.window_anchor": _pixel_point(
+        1121,
+        318,
+        "Picker window anchor near the in-game search area.",
+    ),
+    "picker.search_field": _pixel_point(
+        941,
+        367,
+        "Click point inside the in-game search field.",
+    ),
+    "market.open_card": _pixel_point(
+        2074,
+        607,
+        "Open the selected market item card.",
+    ),
+    "market.buy_button": _pixel_point(
+        265,
+        1953,
+        "Buy button on a market item card.",
+    ),
+    "market.order_button": _pixel_point(
+        1978,
+        1410,
+        "Create order button in the market quantity dialog.",
+    ),
+    "market.quantity_plus": _pixel_point(
+        2008,
+        1106,
+        "Increase market order quantity.",
+    ),
+    "market.quantity_minus": _pixel_point(
+        1801,
+        1106,
+        "Decrease market order quantity.",
+    ),
+    "market.market_tab": _pixel_point(
+        1471,
+        71,
+        "Market tab in the item details view.",
+    ),
+    "market.details_tab": _pixel_point(
+        1617,
+        190,
+        "Details tab in the market view.",
+    ),
+    "market.sell_button": _pixel_point(
+        1409,
+        1959,
+        "Sell button on the market item screen.",
+    ),
+    "market.sell_price_field": _pixel_point(
+        1900,
+        813,
+        "Price field in the sell dialog.",
+    ),
+    "market.sell_all_button": _pixel_point(
+        2218,
+        1190,
+        "All quantity button in the sell dialog.",
+    ),
+    "market.sell_confirm_button": _pixel_point(
+        1987,
+        1500,
+        "Confirm button in the sell dialog.",
+    ),
+    "salvage.storage_tab": _pixel_point(
+        1654,
+        79,
+        "Storage tab before salvage actions.",
+    ),
+    "salvage.details_tab": _pixel_point(
+        1256,
+        181,
+        "Details tab before salvage actions.",
+    ),
+    "salvage.pre_decor_category": _pixel_point(
+        1628,
+        364,
+        "TODO_NAMING_REVIEW: preliminary click before selecting decor category.",
+    ),
+    "salvage.decor_category": _pixel_point(
+        1311,
+        364,
+        "Decor category in storage.",
+    ),
+    "salvage.sort_dropdown": _pixel_point(
+        3419,
+        367,
+        "Sort dropdown in storage.",
+    ),
+    "salvage.sort_new_option": _pixel_point(
+        3366,
+        940,
+        "Sort by newest option.",
+    ),
+    "salvage.sort_type_option": _pixel_point(
+        3371,
+        465,
+        "Sort by type option.",
+    ),
+    "salvage.first_item": _pixel_point(
+        257,
+        691,
+        "First salvageable item in the storage list.",
+    ),
+    "salvage.selected_item": _pixel_point(
+        257,
+        691,
+        "Selected salvage item in the storage list.",
+    ),
+    "salvage.context_disassemble": _pixel_point(
+        230,
+        1310,
+        "Disassemble action in the item context menu.",
+    ),
+    "salvage.context_disassemble_probe_top": _pixel_point(
+        271,
+        1221,
+        "White pixel probe for the upper disassemble menu option.",
+    ),
+    "salvage.context_disassemble_option_top": _pixel_point(
+        230,
+        1315,
+        "Upper disassemble menu option selected when the upper probe is white.",
+    ),
+    "salvage.context_disassemble_probe_bottom": _pixel_point(
+        271,
+        1317,
+        "White pixel probe for the lower disassemble menu option.",
+    ),
+    "salvage.context_disassemble_option_bottom": _pixel_point(
+        231,
+        1402,
+        "Lower disassemble menu option selected when the lower probe is white.",
+    ),
+    "salvage.all_button": _pixel_point(
+        1934,
+        1019,
+        "All button in the disassemble dialog.",
+    ),
+    "salvage.confirm_button": _pixel_point(
+        1921,
+        1469,
+        "Confirm button in the disassemble dialog.",
+    ),
+    "salvage.stop_finish_click": _pixel_point(
+        1519,
+        362,
+        "TODO_NAMING_REVIEW: P014 final click after stopping salvage.",
+    ),
 }
 
 LEGACY_COORDINATE_NAMES = {
@@ -160,10 +197,12 @@ LEGACY_COORDINATE_NAMES = {
     ),
     "SALVAGE_ALL_BUTTON_X_RATIO / SALVAGE_ALL_BUTTON_Y_RATIO": "salvage.all_button",
     "SALVAGE_CONFIRM_BUTTON_X_RATIO / SALVAGE_CONFIRM_BUTTON_Y_RATIO": "salvage.confirm_button",
+    "P014": "salvage.stop_finish_click",
 }
 
 TODO_NAMING_REVIEW = (
     "SALVAGE_PRE_DECOR_CATEGORY_X_RATIO / SALVAGE_PRE_DECOR_CATEGORY_Y_RATIO",
+    "P014",
 )
 
 LEGACY_COORDINATE_SETTINGS = {
@@ -226,12 +265,76 @@ LEGACY_COORDINATE_SETTINGS = {
 }
 
 
-def _valid_point(value):
-    return (
-        isinstance(value, dict)
-        and isinstance(value.get("x_ratio"), (int, float))
-        and isinstance(value.get("y_ratio"), (int, float))
-    )
+def _number(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _point_ratio_pair(point):
+    if not isinstance(point, dict):
+        return None
+
+    x_ratio = _number(point.get("x_ratio"))
+    y_ratio = _number(point.get("y_ratio"))
+    if x_ratio is not None and y_ratio is not None:
+        return x_ratio, y_ratio
+
+    x = _number(point.get("x", point.get("x_pixel")))
+    y = _number(point.get("y", point.get("y_pixel")))
+    base_width = _number(point.get("base_width", DEFAULT_PIXEL_BASE_WIDTH))
+    base_height = _number(point.get("base_height", DEFAULT_PIXEL_BASE_HEIGHT))
+    if (
+        x is None
+        or y is None
+        or base_width is None
+        or base_height is None
+        or base_width <= 0
+        or base_height <= 0
+    ):
+        return None
+
+    return x / base_width, y / base_height
+
+
+def _format_pixel_value(value):
+    number = float(value)
+    if number.is_integer():
+        return int(number)
+    return number
+
+
+def _normalized_point(value, default):
+    ratio_pair = _point_ratio_pair(value)
+    if ratio_pair is None:
+        return None
+
+    description = str(value.get("description", default.get("description", "")))
+
+    has_x_ratio = _number(value.get("x_ratio")) is not None
+    has_y_ratio = _number(value.get("y_ratio")) is not None
+    if has_x_ratio and has_y_ratio:
+        return {
+            "x_ratio": float(value["x_ratio"]),
+            "y_ratio": float(value["y_ratio"]),
+            "description": description,
+        }
+
+    x = _number(value.get("x", value.get("x_pixel")))
+    y = _number(value.get("y", value.get("y_pixel")))
+    base_width = _number(value.get("base_width", DEFAULT_PIXEL_BASE_WIDTH))
+    base_height = _number(value.get("base_height", DEFAULT_PIXEL_BASE_HEIGHT))
+    point = {
+        "x": _format_pixel_value(x),
+        "y": _format_pixel_value(y),
+        "description": description,
+    }
+    if "base_width" in value:
+        point["base_width"] = _format_pixel_value(base_width)
+    if "base_height" in value:
+        point["base_height"] = _format_pixel_value(base_height)
+    return point
 
 
 def merge_coordinates(defaults, overrides):
@@ -241,16 +344,11 @@ def merge_coordinates(defaults, overrides):
 
     for name, override in overrides.items():
         default = result.get(name, {})
-        if not _valid_point(override):
+        point = _normalized_point(override, default)
+        if point is None:
             continue
 
-        result[name] = {
-            "x_ratio": float(override["x_ratio"]),
-            "y_ratio": float(override["y_ratio"]),
-            "description": str(
-                override.get("description", default.get("description", ""))
-            ),
-        }
+        result[name] = point
 
     return result
 
@@ -311,4 +409,22 @@ def apply_legacy_coordinate_settings(coordinates, settings_path):
 
 def coordinate_pair(coordinates, name):
     point = coordinates.get(name) or DEFAULT_COORDINATES[name]
-    return float(point["x_ratio"]), float(point["y_ratio"])
+    ratio_pair = _point_ratio_pair(point)
+    if ratio_pair is not None:
+        return ratio_pair
+
+    return _point_ratio_pair(DEFAULT_COORDINATES[name])
+
+
+def coordinate_screen_point(coordinates, name):
+    point = coordinates.get(name) or DEFAULT_COORDINATES[name]
+    x = _number(point.get("x", point.get("x_pixel")))
+    y = _number(point.get("y", point.get("y_pixel")))
+    if x is not None and y is not None:
+        return round(x), round(y)
+
+    x_ratio, y_ratio = coordinate_pair(coordinates, name)
+    return (
+        round(DEFAULT_PIXEL_BASE_WIDTH * x_ratio),
+        round(DEFAULT_PIXEL_BASE_HEIGHT * y_ratio),
+    )

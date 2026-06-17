@@ -14,6 +14,7 @@ from timer_app.winapi import (
     SWP_NOMOVE,
     SWP_NOSIZE,
     SWP_SHOWWINDOW,
+    SW_MINIMIZE,
     SW_RESTORE,
     SW_SHOW,
     SW_SHOWNOACTIVATE,
@@ -216,6 +217,18 @@ def restore_game_window(hwnd):
         return bool(force_foreground_window(hwnd) or is_game_window(get_foreground_hwnd()))
     except Exception as e:
         log_error("game_window", f"Restore failed: {e}")
+        return False
+
+
+def minimize_window(hwnd):
+    if not hwnd:
+        return False
+
+    try:
+        ctypes.windll.user32.ShowWindow(hwnd, SW_MINIMIZE)
+        return True
+    except Exception as e:
+        log_error("game_window", f"Minimize failed: {e}")
         return False
 
 

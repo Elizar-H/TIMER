@@ -1,7 +1,7 @@
 import ctypes
 import time
 
-from timer_app.coordinates import coordinate_pair
+from timer_app.coordinates import coordinate_pair, coordinate_screen_point
 from timer_app.windows import get_hwnd_ratio_point
 
 
@@ -30,6 +30,9 @@ class GameActions:
     def point(self, point_name):
         return coordinate_pair(self._coordinates, point_name)
 
+    def screen_point(self, point_name):
+        return coordinate_screen_point(self._coordinates, point_name)
+
     def pixel_point(self, point_name, hwnd=None):
         target_hwnd = hwnd if hwnd is not None else self._get_action_hwnd()
         if not target_hwnd:
@@ -47,8 +50,22 @@ class GameActions:
         time.sleep(self._get_hover_delay())
         return True
 
+    def move_to_screen_point(self, point_name):
+        point = self.screen_point(point_name)
+        if point is None:
+            return False
+
+        ctypes.windll.user32.SetCursorPos(point[0], point[1])
+        time.sleep(self._get_hover_delay())
+        return True
+
     def click(self, point_name, hwnd=None):
         if not self.move_to(point_name, hwnd=hwnd):
+            return False
+        return self._send_click(self._get_mouse_click_delay())
+
+    def click_screen(self, point_name):
+        if not self.move_to_screen_point(point_name):
             return False
         return self._send_click(self._get_mouse_click_delay())
 
