@@ -232,6 +232,8 @@ WHITE_PIXEL_SAMPLE_OFFSETS = (
     (0, -1),
     (0, 1),
 )
+SALVAGE_CONTEXT_LIGHT_MIN_CHANNEL = 140
+SALVAGE_CONTEXT_LIGHT_MAX_CHANNEL_SPREAD = 45
 SALVAGE_CONTEXT_DISASSEMBLE_CHOICES = (
     (
         "salvage.context_disassemble_probe_top",
@@ -1474,6 +1476,16 @@ def is_white_pixel(rgb):
     )
 
 
+def is_salvage_context_light_pixel(rgb):
+    if rgb is None:
+        return False
+
+    return (
+        min(rgb) >= SALVAGE_CONTEXT_LIGHT_MIN_CHANNEL
+        and max(rgb) - min(rgb) <= SALVAGE_CONTEXT_LIGHT_MAX_CHANNEL_SPREAD
+    )
+
+
 def count_orange_button_samples(x_ratio, y_ratio, hwnd=None):
     hwnd = hwnd if hwnd is not None else get_picker_action_hwnd()
     if not hwnd:
@@ -2049,6 +2061,19 @@ def first_white_screen_sample(point_name):
     return None, center_rgb
 
 
+def first_salvage_context_light_sample(point_name):
+    samples = get_screen_point_pixel_samples(point_name)
+    if samples is None:
+        return None, None
+
+    for sample_x, sample_y, rgb in samples:
+        if is_salvage_context_light_pixel(rgb):
+            return (sample_x, sample_y), rgb
+
+    center_rgb = samples[0][2] if samples else None
+    return None, center_rgb
+
+
 def select_salvage_context_disassemble_point(stop_event):
     started_at = time.monotonic()
     deadline = started_at + max(0.0, SALVAGE_CONTEXT_PROBE_WAIT_SECONDS)
@@ -2058,8 +2083,8 @@ def select_salvage_context_disassemble_point(stop_event):
         top_probe, top_click = SALVAGE_CONTEXT_DISASSEMBLE_CHOICES[0]
         bottom_probe, bottom_click = SALVAGE_CONTEXT_DISASSEMBLE_CHOICES[1]
 
-        top_hit, top_rgb = first_white_screen_sample(top_probe)
-        bottom_hit, bottom_rgb = first_white_screen_sample(bottom_probe)
+        top_hit, top_rgb = first_salvage_context_light_sample(top_probe)
+        bottom_hit, bottom_rgb = first_salvage_context_light_sample(bottom_probe)
         probe_log_parts = [
             f"{top_probe}={top_rgb}",
             f"{bottom_probe}={bottom_rgb}",
@@ -2085,7 +2110,7 @@ def select_salvage_context_disassemble_point(stop_event):
     append_log_line(
         "salvage context probe "
         + " ".join(probe_log_parts)
-        + f" auto_finish_after_current_step elapsed_ms={elapsed_ms}"
+        + f" finish_after_fallback_step elapsed_ms={elapsed_ms}"
     )
     request_salvage_finish_current_cycle(cleanup=True)
     return "salvage.context_disassemble"
