@@ -77,7 +77,7 @@
   "game_actions": {
     "open_to_buy_delay_seconds": 0.2,
     "buy_to_quantity_delay_seconds": 0.12,
-    "section_click_delay_seconds": 0.045,
+    "section_click_delay_seconds": 0.01,
     "salvage_item_row_step_ratio": 0.233,
     "salvage_confirm_hold_seconds": 0.564,
     "salvage_confirm_wait_seconds": 0.25,

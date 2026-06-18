@@ -181,7 +181,7 @@ GAME_SELL_STEP_DELAY_SECONDS = 0.050
 GAME_ORDER_TO_SELL_DELAY_SECONDS = 0.12
 GAME_OPEN_TO_BUY_DELAY_SECONDS = 0.20
 GAME_BUY_TO_QUANTITY_DELAY_SECONDS = 0.12
-GAME_SECTION_CLICK_DELAY_SECONDS = 0.045
+GAME_SECTION_CLICK_DELAY_SECONDS = 0.010
 SALVAGE_ITEM_ROW_STEP_RATIO = 0.233
 SALVAGE_CONFIRM_HOLD_SECONDS = 0.564
 SALVAGE_CONFIRM_WAIT_SECONDS = 0.25
@@ -205,8 +205,7 @@ MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS = 2.0
 MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS = 0.005
 MARKET_ORDER_COMPLETE_ORANGE_RGB = (0xB5, 0x4A, 0x03)
 MARKET_ORDER_COMPLETE_ORANGE_TOLERANCE = 45
-MARKET_POST_ORDER_ESCAPE_WAIT_SECONDS = 4.0
-MARKET_POST_ORDER_ESCAPE_POLL_SECONDS = 0.005
+MARKET_ORDER_COMPLETE_ESC_REPEAT_DELAY_SECONDS = 0.020
 GAME_BUTTON_SAMPLE_OFFSETS = (
     (-70, -10),
     (-45, 12),
@@ -553,6 +552,8 @@ picker_display_rows = []
 picker_total_content_height = 0
 picker_hover_row_index = None
 picker_selected_row_index = None
+picker_pending_row_index = None
+picker_pending_selection_token = 0
 picker_font_cache = {}
 picker_columns_cache = {}
 picker_current_width = PICKER_WIDTH
@@ -574,6 +575,8 @@ right_arrow_hold_compensated = False
 right_arrow_last_action_stage = None
 market_order_complete_probe_running = False
 market_order_complete_probe_lock = threading.Lock()
+market_order_complete_probe_done = threading.Event()
+market_order_complete_probe_done.set()
 up_arrow_was_down = False
 up_arrow_press_at = 0
 up_arrow_hold_triggered = False
@@ -1528,8 +1531,8 @@ def decrease_market_item_quantity():
     return game.click("market.quantity_minus")
 
 
-def read_market_view_probe():
-    point = game.screen_point("market.market_view_probe")
+def read_screen_point_rgb(point_name):
+    point = game.screen_point(point_name)
     if point is None:
         return None
 
@@ -1537,22 +1540,34 @@ def read_market_view_probe():
     return get_screen_pixel_rgb(x, y)
 
 
+def read_market_view_probe():
+    return read_screen_point_rgb("market.market_view_probe")
+
+
+def read_market_details_view_probe():
+    return read_screen_point_rgb("market.details_view_probe")
+
+
 def ensure_market_view_before_picker_navigation():
     if not get_picker_action_hwnd():
         return False
 
-    rgb = read_market_view_probe()
-    if is_orange_button_pixel(rgb):
+    market_rgb = read_market_view_probe()
+    details_rgb = read_market_details_view_probe()
+    if is_orange_button_pixel(details_rgb):
         return True
 
-    append_log_line(f"market navigation: esc before picker move rgb={rgb}")
-    tap_key_scancode(VK_ESCAPE, delay=0.010)
-    reset_market_action_stage()
-    time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
-    return True
+    append_log_line(
+        "market navigation: open market details "
+        f"market_rgb={market_rgb} details_rgb={details_rgb}"
+    )
+    return open_picker_market_details()
 
 
 def ensure_market_ready_for_picker_selection():
+    if not wait_market_order_complete_probe_if_running():
+        return False
+
     if get_picker_action_hwnd():
         return ensure_market_view_before_picker_navigation()
 
@@ -1590,42 +1605,6 @@ def read_market_order_complete_probe():
     return None, get_screen_pixel_rgb(x, y)
 
 
-def read_market_post_order_escape_probe():
-    point = game.screen_point("market.post_order_escape_probe")
-    if point is None:
-        return None, None
-
-    x, y = point
-    for offset_x, offset_y in WHITE_PIXEL_SAMPLE_OFFSETS:
-        sample_x = x + offset_x
-        sample_y = y + offset_y
-        rgb = get_screen_pixel_rgb(sample_x, sample_y)
-        if is_white_pixel(rgb):
-            return (sample_x, sample_y), rgb
-
-    return None, get_screen_pixel_rgb(x, y)
-
-
-def wait_market_post_order_escape_and_escape():
-    deadline = time.monotonic() + MARKET_POST_ORDER_ESCAPE_WAIT_SECONDS
-    last_rgb = None
-    while time.monotonic() < deadline:
-        if not get_picker_action_hwnd():
-            return False
-
-        hit_point, rgb = read_market_post_order_escape_probe()
-        last_rgb = rgb
-        if hit_point is not None:
-            append_log_line(f"market post order white: esc at {hit_point} rgb={rgb}")
-            tap_key_scancode(VK_ESCAPE, delay=0.010)
-            return True
-
-        time.sleep(MARKET_POST_ORDER_ESCAPE_POLL_SECONDS)
-
-    append_log_line(f"market post order white timeout: last_rgb={last_rgb}")
-    return False
-
-
 def wait_market_order_complete_and_escape():
     global market_order_complete_probe_running, right_shift_order_down
 
@@ -1645,7 +1624,8 @@ def wait_market_order_complete_and_escape():
                     right_shift_order_down = False
                 reset_market_action_stage()
                 tap_key_scancode(VK_ESCAPE, delay=0.010)
-                wait_market_post_order_escape_and_escape()
+                time.sleep(MARKET_ORDER_COMPLETE_ESC_REPEAT_DELAY_SECONDS)
+                tap_key_scancode(VK_ESCAPE, delay=0.010)
                 return
 
             time.sleep(MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS)
@@ -1654,6 +1634,7 @@ def wait_market_order_complete_and_escape():
     finally:
         with market_order_complete_probe_lock:
             market_order_complete_probe_running = False
+            market_order_complete_probe_done.set()
 
 
 def start_market_order_complete_escape_probe():
@@ -1663,8 +1644,80 @@ def start_market_order_complete_escape_probe():
         if market_order_complete_probe_running:
             return
         market_order_complete_probe_running = True
+        market_order_complete_probe_done.clear()
 
     threading.Thread(target=wait_market_order_complete_and_escape, daemon=True).start()
+
+
+def is_market_order_complete_probe_running():
+    with market_order_complete_probe_lock:
+        return market_order_complete_probe_running
+
+
+def wait_market_order_complete_probe_if_running():
+    if not is_market_order_complete_probe_running():
+        return True
+
+    append_log_line("market navigation: waiting for order complete probe")
+    wait_seconds = MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS + 0.25
+    return market_order_complete_probe_done.wait(wait_seconds)
+
+
+def cancel_pending_picker_selection(redraw=False):
+    global picker_pending_row_index, picker_pending_selection_token
+
+    picker_pending_selection_token += 1
+    picker_pending_row_index = None
+    if redraw:
+        draw_picker_hover(picker_selected_row_index)
+
+
+def begin_pending_picker_selection(row_index, item_name):
+    global picker_pending_row_index, picker_pending_selection_token
+
+    if not is_market_order_complete_probe_running():
+        return False
+
+    picker_pending_selection_token += 1
+    token = picker_pending_selection_token
+    picker_pending_row_index = row_index
+    draw_picker_hover(row_index)
+
+    def wait_and_finish():
+        wait_ok = wait_market_order_complete_probe_if_running()
+        root.after(
+            0,
+            lambda: finish_pending_picker_selection(
+                token,
+                row_index,
+                item_name,
+                wait_ok,
+            ),
+        )
+
+    threading.Thread(target=wait_and_finish, daemon=True).start()
+    return True
+
+
+def finish_pending_picker_selection(token, row_index, item_name, wait_ok):
+    global picker_pending_row_index
+
+    if token != picker_pending_selection_token:
+        return
+
+    picker_pending_row_index = None
+    draw_picker_hover(picker_selected_row_index)
+
+    if not wait_ok:
+        append_log_line("market navigation: order complete probe wait failed")
+        return
+    if picker_selected_row_index != row_index:
+        return
+    if not ensure_market_ready_for_picker_selection():
+        return
+
+    reset_market_action_stage()
+    paste_item_name(item_name)
 
 
 def open_game_market_details():
@@ -2826,7 +2879,7 @@ def get_picker_hover_bg(kind, key, default_bg):
     return "#16202a" if default_bg == "#101418" else default_bg
 
 
-def draw_picker_item_canvas(row, is_hover=False):
+def draw_picker_item_canvas(row, is_hover=False, is_pending=False):
     item = row["item"]
     kind = row.get("kind", get_picker_item_kind(item))
     values = get_picker_item_cell_values(item)
@@ -2896,7 +2949,7 @@ def draw_picker_item_canvas(row, is_hover=False):
             15,
             y + row["height"] - 10,
             1,
-            fill="#f0cf23",
+            fill="#2f8cff" if is_pending else "#f0cf23",
         )
 
 
@@ -2929,6 +2982,7 @@ def draw_picker_canvas_rows():
                     row_index == picker_hover_row_index
                     or row_index == picker_selected_row_index
                 ),
+                is_pending=(row_index == picker_pending_row_index),
             )
 
     picker_canvas.configure(scrollregion=(0, 0, width, max(total_height, 1)))
@@ -3036,10 +3090,15 @@ def select_picker_row(row_index, paste=True):
     scroll_picker_row_into_view(row)
     draw_picker_hover(row_index)
     if paste:
+        item_name = item["name"]
+        if begin_pending_picker_selection(row_index, item_name):
+            return
+
+        cancel_pending_picker_selection(redraw=True)
         if not ensure_market_ready_for_picker_selection():
             return
         reset_market_action_stage()
-        paste_item_name(item["name"])
+        paste_item_name(item_name)
 
 
 def move_picker_selection(direction):

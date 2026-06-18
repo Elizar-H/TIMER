@@ -45,11 +45,6 @@ DEFAULT_COORDINATES = {
         860,
         "Orange pixel probe after confirming a market order.",
     ),
-    "market.post_order_escape_probe": _pixel_point(
-        2678,
-        248,
-        "White pixel probe after the first escape from a completed market order.",
-    ),
     "market.quantity_plus": _pixel_point(
         2008,
         1106,
@@ -61,19 +56,24 @@ DEFAULT_COORDINATES = {
         "Decrease market order quantity.",
     ),
     "market.market_tab": _pixel_point(
-        1471,
-        71,
+        1459,
+        67,
         "Market tab in the item details view.",
     ),
     "market.details_tab": _pixel_point(
-        1617,
-        190,
+        1635,
+        186,
         "Details tab in the market view.",
     ),
     "market.market_view_probe": _pixel_point(
         1458,
         0,
         "Orange pixel probe that indicates the market list view is active.",
+    ),
+    "market.details_view_probe": _pixel_point(
+        1600,
+        238,
+        "Orange pixel probe that indicates the market details tab is active.",
     ),
     "market.sell_button": _pixel_point(
         1409,

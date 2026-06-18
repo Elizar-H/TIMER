@@ -60,7 +60,7 @@ DEFAULT_SETTINGS = {
         "order_to_sell_delay_seconds": 0.12,
         "open_to_buy_delay_seconds": 0.20,
         "buy_to_quantity_delay_seconds": 0.12,
-        "section_click_delay_seconds": 0.045,
+        "section_click_delay_seconds": 0.010,
         "salvage_item_row_step_ratio": 0.233,
         "salvage_confirm_hold_seconds": 0.564,
         "salvage_confirm_wait_seconds": 0.25,
