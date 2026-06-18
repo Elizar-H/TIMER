@@ -1,8 +1,10 @@
 import ctypes
 import queue
 import threading
+import time
 
 from timer_app.winapi import (
+    KEYEVENTF_KEYUP,
     MSG,
     VK_DELETE,
     VK_DOWN,
@@ -19,6 +21,7 @@ PICKER_HOTKEY_ID = 7311
 PICKER_OPEN_END_HOTKEY_ID = 7316
 PICKER_HOTKEY_VK = 0xC0
 SALVAGE_HOTKEY_ID = 7317
+MOD_NOREPEAT = 0x4000
 PICKER_UP_HOTKEY_ID = 7312
 PICKER_DOWN_HOTKEY_ID = 7313
 PICKER_RIGHT_HOTKEY_ID = 7314
@@ -38,6 +41,7 @@ class HotkeyWorker:
         self._log_error = log_error
         self._thread_id = None
         self._picker_navigation_registered = False
+        self._salvage_registered = False
 
     def start(self):
         threading.Thread(target=self._run, daemon=True).start()
@@ -49,6 +53,10 @@ class HotkeyWorker:
     def set_picker_navigation(self, enabled):
         command = "register_picker_nav" if enabled else "unregister_picker_nav"
         self._commands.put(command)
+        self._wake()
+
+    def pass_delete_once(self):
+        self._commands.put("pass_delete")
         self._wake()
 
     def _wake(self):
@@ -91,11 +99,51 @@ class HotkeyWorker:
                     ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
                 self._picker_navigation_registered = False
 
+            elif command == "pass_delete":
+                self._pass_delete_once()
+
+    def _register_salvage_hotkey(self):
+        if self._salvage_registered:
+            return True
+
+        if ctypes.windll.user32.RegisterHotKey(
+            None,
+            SALVAGE_HOTKEY_ID,
+            MOD_NOREPEAT,
+            VK_DELETE,
+        ):
+            self._salvage_registered = True
+            return True
+
+        self._log_error("hotkey", "RegisterHotKey failed for Delete")
+        return False
+
+    def _unregister_salvage_hotkey(self):
+        if not self._salvage_registered:
+            return
+
+        ctypes.windll.user32.UnregisterHotKey(None, SALVAGE_HOTKEY_ID)
+        self._salvage_registered = False
+
+    def _pass_delete_once(self):
+        was_registered = self._salvage_registered
+        if was_registered:
+            self._unregister_salvage_hotkey()
+            time.sleep(0.006)
+
+        ctypes.windll.user32.keybd_event(VK_DELETE, 0, 0, 0)
+        time.sleep(0.004)
+        ctypes.windll.user32.keybd_event(VK_DELETE, 0, KEYEVENTF_KEYUP, 0)
+
+        if was_registered:
+            time.sleep(0.020)
+            self._register_salvage_hotkey()
+
     def _register_base_hotkeys(self):
         if not ctypes.windll.user32.RegisterHotKey(
             None,
             PICKER_HOTKEY_ID,
-            0,
+            MOD_NOREPEAT,
             PICKER_HOTKEY_VK,
         ):
             self._log_error("hotkey", "RegisterHotKey failed for ё / `")
@@ -103,17 +151,11 @@ class HotkeyWorker:
         if not ctypes.windll.user32.RegisterHotKey(
             None,
             PICKER_OPEN_END_HOTKEY_ID,
-            0,
+            MOD_NOREPEAT,
             VK_END,
         ):
             self._log_error("hotkey", "RegisterHotKey failed for End")
-        if not ctypes.windll.user32.RegisterHotKey(
-            None,
-            SALVAGE_HOTKEY_ID,
-            0,
-            VK_DELETE,
-        ):
-            self._log_error("hotkey", "RegisterHotKey failed for Delete")
+        self._register_salvage_hotkey()
 
         return True
 

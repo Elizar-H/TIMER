@@ -584,6 +584,7 @@ picker_end_hold_pending = False
 picker_end_hold_consumed = False
 picker_end_press_active = False
 picker_end_press_was_open = False
+picker_end_started_in_game = False
 picker_end_hold_triggered = False
 picker_end_background_hold_triggered = False
 picker_end_latched = False
@@ -1396,6 +1397,45 @@ def get_picker_action_hwnd():
     return 0
 
 
+def get_salvage_action_hwnd():
+    global picker_target_hwnd, last_alert_context_hwnd
+
+    foreground_hwnd = get_picker_action_hwnd()
+    if foreground_hwnd:
+        picker_target_hwnd = foreground_hwnd
+        last_alert_context_hwnd = foreground_hwnd
+        return foreground_hwnd
+
+    if not is_picker_open():
+        append_log_line("salvage desktop start skipped: picker is closed")
+        return 0
+
+    target_hwnd = 0
+    for hwnd in (picker_target_hwnd, last_alert_context_hwnd):
+        if hwnd and is_live_game_window(hwnd):
+            target_hwnd = hwnd
+            break
+
+    if not target_hwnd:
+        target_hwnd = find_game_window()
+        if not target_hwnd:
+            append_log_line("salvage desktop start skipped: game window not found")
+            return 0
+
+    if restore_game_window(target_hwnd):
+        foreground_hwnd = get_foreground_hwnd()
+        if foreground_hwnd and is_game_window(foreground_hwnd):
+            picker_target_hwnd = foreground_hwnd
+            last_alert_context_hwnd = foreground_hwnd
+            return foreground_hwnd
+        picker_target_hwnd = target_hwnd
+        last_alert_context_hwnd = target_hwnd
+        return target_hwnd
+
+    append_log_line("salvage desktop start skipped: game restore failed")
+    return 0
+
+
 def is_orange_button_pixel(rgb):
     if rgb is None:
         return False
@@ -1420,8 +1460,8 @@ def is_white_pixel(rgb):
     )
 
 
-def count_orange_button_samples(x_ratio, y_ratio):
-    hwnd = get_picker_action_hwnd()
+def count_orange_button_samples(x_ratio, y_ratio, hwnd=None):
+    hwnd = hwnd if hwnd is not None else get_picker_action_hwnd()
     if not hwnd:
         return 0
 
@@ -1444,12 +1484,16 @@ def count_orange_button_samples(x_ratio, y_ratio):
     return hits
 
 
-def is_game_button_visible(x_ratio, y_ratio):
-    return count_orange_button_samples(x_ratio, y_ratio) >= GAME_BUTTON_SAMPLE_REQUIRED_HITS
+def is_game_button_visible(x_ratio, y_ratio, hwnd=None):
+    return count_orange_button_samples(
+        x_ratio,
+        y_ratio,
+        hwnd=hwnd,
+    ) >= GAME_BUTTON_SAMPLE_REQUIRED_HITS
 
 
-def is_game_point_visible(point_name):
-    return is_game_button_visible(*game.point(point_name))
+def is_game_point_visible(point_name, hwnd=None):
+    return is_game_button_visible(*game.point(point_name), hwnd=hwnd)
 
 
 def detect_market_action_stage():
@@ -1491,6 +1535,16 @@ def open_game_market_details():
     if clicked_market or clicked_details:
         reset_market_action_stage()
     return clicked_market and clicked_details
+
+
+def open_picker_market_details():
+    if not get_or_restore_game_hwnd():
+        append_log_line("picker End open skipped: game window not found")
+        return False
+
+    open_game_market_details()
+    show_picker(toggle=False)
+    return True
 
 
 def set_market_action_stage(stage, ready_at=0):
@@ -1550,9 +1604,7 @@ def resolve_picker_end_hold(expected_press_at):
 
     if is_virtual_key_down(VK_END):
         picker_end_hold_triggered = True
-        if get_or_restore_game_hwnd():
-            open_game_market_details()
-            show_picker(toggle=False)
+        open_picker_market_details()
 
 
 def resolve_picker_end_background_hold(expected_press_at):
@@ -1591,7 +1643,7 @@ def schedule_picker_end_hold_check():
 def handle_picker_end_hotkey():
     global picker_end_press_active, picker_end_press_was_open, picker_end_hold_triggered
     global picker_end_background_hold_triggered, picker_end_latched, picker_end_press_at
-    global picker_end_previous_hwnd
+    global picker_end_previous_hwnd, picker_end_started_in_game
 
     if time.monotonic() < picker_end_ignore_until:
         return
@@ -1603,9 +1655,11 @@ def handle_picker_end_hotkey():
     picker_end_press_at = time.monotonic()
     picker_end_press_active = True
     picker_end_press_was_open = is_picker_open()
+    picker_end_started_in_game = False
     picker_end_hold_triggered = False
     picker_end_background_hold_triggered = False
     foreground_hwnd = get_foreground_hwnd()
+    picker_end_started_in_game = bool(foreground_hwnd and is_game_window(foreground_hwnd))
     if (
         foreground_hwnd
         and not is_own_overlay_hwnd(foreground_hwnd)
@@ -1615,7 +1669,7 @@ def handle_picker_end_hotkey():
     else:
         picker_end_previous_hwnd = 0
 
-    if not picker_end_press_was_open:
+    if picker_end_started_in_game and not picker_end_press_was_open:
         show_picker(toggle=False)
 
     schedule_picker_end_hold_check()
@@ -1623,18 +1677,25 @@ def handle_picker_end_hotkey():
 
 def finish_picker_end_press():
     global picker_end_press_active, picker_end_hold_pending, picker_end_latched
-    global picker_end_ignore_until
+    global picker_end_ignore_until, picker_end_started_in_game
 
     if not picker_end_press_active:
         picker_end_latched = False
+        picker_end_started_in_game = False
         return
 
+    started_in_game = picker_end_started_in_game
     picker_end_press_active = False
     picker_end_hold_pending = False
     picker_end_latched = False
+    picker_end_started_in_game = False
 
     if picker_end_hold_triggered:
         picker_end_ignore_until = time.monotonic() + 0.35
+        return
+
+    if not started_in_game:
+        open_picker_market_details()
         return
 
     if picker_end_press_was_open:
@@ -1660,9 +1721,14 @@ def sleep_with_stop(seconds, stop_event, mouse_guard=False):
 
 
 def salvage_click(point_name, stop_event, right=False):
-    if stop_event.is_set() or not get_picker_action_hwnd():
+    target_hwnd = salvage_action_hwnd or get_picker_action_hwnd()
+    if stop_event.is_set() or not target_hwnd:
         return False
-    ok = game.right_click(point_name) if right else game.click(point_name)
+    ok = (
+        game.right_click(point_name, hwnd=target_hwnd)
+        if right
+        else game.click(point_name, hwnd=target_hwnd)
+    )
     if ok:
         note_salvage_cursor_pos()
         sleep_with_stop(SALVAGE_STEP_DELAY_SECONDS, stop_event, mouse_guard=True)
@@ -1712,7 +1778,7 @@ def select_salvage_context_disassemble_point(stop_event):
     deadline = started_at + max(0.0, SALVAGE_CONTEXT_PROBE_WAIT_SECONDS)
     probe_log_parts = []
 
-    while not stop_event.is_set() and get_picker_action_hwnd():
+    while not stop_event.is_set() and is_live_game_window(salvage_action_hwnd):
         probe_log_parts = []
         for probe_point, click_point in SALVAGE_CONTEXT_DISASSEMBLE_CHOICES:
             hit_point, rgb = first_white_screen_sample(probe_point)
@@ -1741,7 +1807,8 @@ def select_salvage_context_disassemble_point(stop_event):
 
 
 def salvage_click_screen(point_name, stop_event):
-    if stop_event.is_set() or not get_picker_action_hwnd():
+    target_hwnd = salvage_action_hwnd or get_picker_action_hwnd()
+    if stop_event.is_set() or not target_hwnd:
         return False
 
     ok = game.click_screen(point_name)
@@ -1752,7 +1819,8 @@ def salvage_click_screen(point_name, stop_event):
 
 
 def salvage_click_context_disassemble(stop_event):
-    if stop_event.is_set() or not get_picker_action_hwnd():
+    target_hwnd = salvage_action_hwnd or get_picker_action_hwnd()
+    if stop_event.is_set() or not target_hwnd:
         return False
 
     point_name = select_salvage_context_disassemble_point(stop_event)
@@ -1765,10 +1833,11 @@ def salvage_click_context_disassemble(stop_event):
 def salvage_right_click_item(point_name, stop_event):
     global salvage_last_item_right_click_at
 
-    if stop_event.is_set() or not get_picker_action_hwnd():
+    target_hwnd = salvage_action_hwnd or get_picker_action_hwnd()
+    if stop_event.is_set() or not target_hwnd:
         return False
 
-    if not game.move_to(point_name):
+    if not game.move_to(point_name, hwnd=target_hwnd):
         return False
     note_salvage_cursor_pos()
     if not sleep_with_stop(SALVAGE_ITEM_HOVER_DELAY_SECONDS, stop_event, mouse_guard=True):
@@ -1788,13 +1857,13 @@ def salvage_right_click_item(point_name, stop_event):
 
 
 def salvage_confirm_available():
-    return is_game_point_visible("salvage.confirm_button")
+    return is_game_point_visible("salvage.confirm_button", hwnd=salvage_action_hwnd)
 
 
 def wait_for_salvage_confirm_available(stop_event):
     deadline = time.monotonic() + max(0.0, SALVAGE_CONFIRM_WAIT_SECONDS)
 
-    while not stop_event.is_set() and get_picker_action_hwnd():
+    while not stop_event.is_set() and is_live_game_window(salvage_action_hwnd):
         if salvage_confirm_available():
             return True
 
@@ -1872,8 +1941,9 @@ def run_salvage_loop(stop_event):
     global salvage_finish_current_cycle_requested
 
     try:
-        hwnd = get_picker_action_hwnd()
+        hwnd = salvage_action_hwnd or get_salvage_action_hwnd()
         if not hwnd:
+            append_log_line("salvage start failed: game window not found")
             return
 
         salvage_action_hwnd = hwnd
@@ -1902,7 +1972,7 @@ def run_salvage_loop(stop_event):
         while (
             not stop_event.is_set()
             and not salvage_finish_current_cycle_requested
-            and get_picker_action_hwnd()
+            and is_live_game_window(salvage_action_hwnd)
         ):
             if not salvage_right_click_item("salvage.first_item", stop_event):
                 break
@@ -1995,14 +2065,18 @@ def request_salvage_finish_current_cycle(cleanup=False):
 
 def start_salvage_loop(arm_pair=True):
     global salvage_running, salvage_delete_was_down
+    global salvage_action_hwnd
     global salvage_cleanup_requested, salvage_restart_after_stop, salvage_arm_after_restart
     global salvage_finish_current_cycle_requested
 
     if salvage_running:
         return False
-    if not get_picker_action_hwnd():
+    target_hwnd = get_salvage_action_hwnd()
+    if not target_hwnd:
+        append_log_line("salvage start skipped: picker/game window not available")
         return False
 
+    salvage_action_hwnd = target_hwnd
     salvage_delete_was_down = is_virtual_key_down(VK_DELETE)
     salvage_cleanup_requested = False
     salvage_restart_after_stop = False
@@ -2043,12 +2117,19 @@ def handle_salvage_del_press(ignore_latch=False):
         run_salvage_second_script()
         return
 
+    if not salvage_running and not get_picker_action_hwnd() and not is_picker_open():
+        append_log_line("salvage Del ignored: picker is closed")
+        hotkeys.pass_delete_once()
+        return
+
     append_log_line("salvage Del pair: first script")
     if salvage_running:
         request_salvage_stop(restart=True, arm_after_restart=True)
         return
 
-    start_salvage_loop(arm_pair=True)
+    if not start_salvage_loop(arm_pair=True):
+        append_log_line("salvage Del first script start failed")
+        hotkeys.pass_delete_once()
 
 
 def set_order_button_hold(is_down):
@@ -3074,8 +3155,12 @@ def show_picker(toggle=True):
     foreground_hwnd = get_foreground_hwnd()
     if foreground_hwnd and not is_own_overlay_hwnd(foreground_hwnd) and is_game_window(foreground_hwnd):
         picker_target_hwnd = foreground_hwnd
+    elif picker_target_hwnd and is_live_game_window(picker_target_hwnd):
+        return
+    elif last_alert_context_hwnd and is_live_game_window(last_alert_context_hwnd):
+        picker_target_hwnd = last_alert_context_hwnd
+        return
     else:
-        picker_target_hwnd = None
         return
 
     reset_market_action_stage()
