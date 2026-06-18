@@ -93,7 +93,6 @@
     "salvage_mouse_cancel_threshold_pixels": 12,
     "picker_open_hold_seconds": 0.14,
     "picker_end_release_grace_seconds": 0.05,
-    "picker_end_background_hold_seconds": 0.75,
     "right_arrow_hold_seconds": 0.09,
     "market_action_stage_max_age_seconds": 1.1,
     "right_shift_poll_seconds": 0.01,

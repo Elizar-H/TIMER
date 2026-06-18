@@ -198,7 +198,6 @@ SALVAGE_POST_ALL_CLICK_DELAY_SECONDS = 0.04
 SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS = 12
 PICKER_OPEN_HOLD_SECONDS = 0.14
 PICKER_END_RELEASE_GRACE_SECONDS = 0.05
-PICKER_END_BACKGROUND_HOLD_SECONDS = 0.75
 RIGHT_ARROW_HOLD_SECONDS = 0.09
 PICKER_ARROW_EDGE_HOLD_SECONDS = 0.20
 MARKET_ACTION_STAGE_MAX_AGE_SECONDS = 1.10
@@ -206,7 +205,7 @@ MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS = 2.0
 MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS = 0.005
 MARKET_ORDER_COMPLETE_ORANGE_RGB = (0xB5, 0x4A, 0x03)
 MARKET_ORDER_COMPLETE_ORANGE_TOLERANCE = 45
-MARKET_POST_ORDER_ESCAPE_WAIT_SECONDS = 2.0
+MARKET_POST_ORDER_ESCAPE_WAIT_SECONDS = 4.0
 MARKET_POST_ORDER_ESCAPE_POLL_SECONDS = 0.005
 GAME_BUTTON_SAMPLE_OFFSETS = (
     (-70, -10),
@@ -318,7 +317,7 @@ def apply_settings():
     global SALVAGE_CONTEXT_PROBE_WAIT_SECONDS, SALVAGE_CONTEXT_PROBE_POLL_SECONDS
     global SALVAGE_POST_MENU_CLICK_DELAY_SECONDS, SALVAGE_POST_ALL_CLICK_DELAY_SECONDS
     global SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS
-    global PICKER_END_RELEASE_GRACE_SECONDS, PICKER_END_BACKGROUND_HOLD_SECONDS
+    global PICKER_END_RELEASE_GRACE_SECONDS
     global RIGHT_ARROW_HOLD_SECONDS
     global MARKET_ACTION_STAGE_MAX_AGE_SECONDS
     global RIGHT_SHIFT_POLL_SECONDS
@@ -491,13 +490,6 @@ def apply_settings():
             settings,
             "game_actions.picker_end_release_grace_seconds",
             PICKER_END_RELEASE_GRACE_SECONDS,
-        )
-    )
-    PICKER_END_BACKGROUND_HOLD_SECONDS = float(
-        setting(
-            settings,
-            "game_actions.picker_end_background_hold_seconds",
-            PICKER_END_BACKGROUND_HOLD_SECONDS,
         )
     )
     RIGHT_ARROW_HOLD_SECONDS = float(
@@ -1547,16 +1539,24 @@ def read_market_view_probe():
 
 def ensure_market_view_before_picker_navigation():
     if not get_picker_action_hwnd():
-        return
+        return False
 
     rgb = read_market_view_probe()
     if is_orange_button_pixel(rgb):
-        return
+        return True
 
     append_log_line(f"market navigation: esc before picker move rgb={rgb}")
     tap_key_scancode(VK_ESCAPE, delay=0.010)
     reset_market_action_stage()
     time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
+    return True
+
+
+def ensure_market_ready_for_picker_selection():
+    if get_picker_action_hwnd():
+        return ensure_market_view_before_picker_navigation()
+
+    return open_picker_market_details()
 
 
 def is_market_order_complete_orange(rgb):
@@ -1733,6 +1733,7 @@ def handle_market_action_left():
 
 def resolve_picker_end_hold(expected_press_at):
     global picker_end_hold_pending, picker_end_hold_triggered
+    global picker_end_background_hold_triggered
 
     if expected_press_at != picker_end_press_at:
         return
@@ -1743,22 +1744,8 @@ def resolve_picker_end_hold(expected_press_at):
 
     if is_virtual_key_down(VK_END):
         picker_end_hold_triggered = True
-        open_picker_market_details()
-
-
-def resolve_picker_end_background_hold(expected_press_at):
-    global picker_end_hold_triggered, picker_end_background_hold_triggered
-
-    if expected_press_at != picker_end_press_at:
-        return
-    if picker_end_background_hold_triggered or not picker_end_press_active:
-        return
-    if not is_virtual_key_down(VK_END):
-        return
-
-    picker_end_hold_triggered = True
-    picker_end_background_hold_triggered = True
-    send_game_to_background()
+        picker_end_background_hold_triggered = True
+        send_game_to_background()
 
 
 def schedule_picker_end_hold_check():
@@ -1772,10 +1759,6 @@ def schedule_picker_end_hold_check():
     root.after(
         max(1, int(PICKER_OPEN_HOLD_SECONDS * 1000)),
         lambda: resolve_picker_end_hold(press_at),
-    )
-    root.after(
-        max(1, int(PICKER_END_BACKGROUND_HOLD_SECONDS * 1000)),
-        lambda: resolve_picker_end_background_hold(press_at),
     )
 
 
@@ -3011,14 +2994,9 @@ def get_picker_canvas_item_at(event):
 
 
 def on_picker_canvas_click(event):
-    global picker_selected_row_index
-
     row_index, item = get_picker_canvas_item_at(event)
     if item:
-        picker_selected_row_index = row_index
-        draw_picker_hover(row_index)
-        reset_market_action_stage()
-        paste_item_name(item["name"])
+        select_picker_row(row_index, paste=True)
 
 
 def get_picker_item_row_indices():
@@ -3058,6 +3036,8 @@ def select_picker_row(row_index, paste=True):
     scroll_picker_row_into_view(row)
     draw_picker_hover(row_index)
     if paste:
+        if not ensure_market_ready_for_picker_selection():
+            return
         reset_market_action_stage()
         paste_item_name(item["name"])
 
@@ -3077,7 +3057,6 @@ def move_picker_selection(direction):
         next_position = (current_position + direction) % len(item_rows)
         target_index = item_rows[next_position]
 
-    ensure_market_view_before_picker_navigation()
     select_picker_row(target_index, paste=True)
 
 
@@ -3110,7 +3089,6 @@ def move_picker_selection_to_section(direction):
 
     if picker_selected_row_index not in get_picker_item_row_indices():
         target_index = section_first_rows[0] if direction > 0 else section_first_rows[-1]
-        ensure_market_view_before_picker_navigation()
         select_picker_row(target_index, paste=True)
         return
 
@@ -3127,7 +3105,6 @@ def move_picker_selection_to_section(direction):
         target_position = (current_section_position + direction) % len(section_first_rows)
 
     target_index = section_first_rows[target_position]
-    ensure_market_view_before_picker_navigation()
     select_picker_row(target_index, paste=True)
 
 
