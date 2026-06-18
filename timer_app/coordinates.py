@@ -56,8 +56,8 @@ DEFAULT_COORDINATES = {
         "Decrease market order quantity.",
     ),
     "market.market_tab": _pixel_point(
-        1459,
-        67,
+        1452,
+        74,
         "Market tab in the item details view.",
     ),
     "market.details_tab": _pixel_point(
@@ -65,15 +65,10 @@ DEFAULT_COORDINATES = {
         186,
         "Details tab in the market view.",
     ),
-    "market.market_view_probe": _pixel_point(
-        1458,
-        0,
-        "Orange pixel probe that indicates the market list view is active.",
-    ),
-    "market.details_view_probe": _pixel_point(
-        1600,
-        238,
-        "Orange pixel probe that indicates the market details tab is active.",
+    "market.lots_tab": _pixel_point(
+        1930,
+        184,
+        "My lots tab in the market view.",
     ),
     "market.sell_button": _pixel_point(
         1409,

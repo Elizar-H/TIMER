@@ -40,8 +40,8 @@
     "description": "Decrease market order quantity."
   },
   "market.market_tab": {
-    "x": 1459,
-    "y": 67,
+    "x": 1452,
+    "y": 74,
     "description": "Market tab in the item details view."
   },
   "market.details_tab": {
@@ -49,15 +49,10 @@
     "y": 186,
     "description": "Details tab in the market view."
   },
-  "market.market_view_probe": {
-    "x": 1458,
-    "y": 0,
-    "description": "Orange pixel probe that indicates the market list view is active."
-  },
-  "market.details_view_probe": {
-    "x": 1600,
-    "y": 238,
-    "description": "Orange pixel probe that indicates the market details tab is active."
+  "market.lots_tab": {
+    "x": 1930,
+    "y": 184,
+    "description": "My lots tab in the market view."
   },
   "market.sell_button": {
     "x": 1409,

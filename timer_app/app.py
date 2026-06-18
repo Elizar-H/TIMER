@@ -206,6 +206,10 @@ MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS = 0.005
 MARKET_ORDER_COMPLETE_ORANGE_RGB = (0xB5, 0x4A, 0x03)
 MARKET_ORDER_COMPLETE_ORANGE_TOLERANCE = 45
 MARKET_ORDER_COMPLETE_ESC_REPEAT_DELAY_SECONDS = 0.020
+MARKET_TAB_ACTIVE_RGB = (0xFF, 0x99, 0x00)
+MARKET_TAB_ACTIVE_TOLERANCE = 55
+MARKET_SUBTAB_DETAILS = "details"
+MARKET_SUBTAB_LOTS = "lots"
 GAME_BUTTON_SAMPLE_OFFSETS = (
     (-70, -10),
     (-45, 12),
@@ -577,6 +581,7 @@ market_order_complete_probe_running = False
 market_order_complete_probe_lock = threading.Lock()
 market_order_complete_probe_done = threading.Event()
 market_order_complete_probe_done.set()
+market_current_subtab = MARKET_SUBTAB_DETAILS
 up_arrow_was_down = False
 up_arrow_press_at = 0
 up_arrow_hold_triggered = False
@@ -1540,26 +1545,43 @@ def read_screen_point_rgb(point_name):
     return get_screen_pixel_rgb(x, y)
 
 
-def read_market_view_probe():
-    return read_screen_point_rgb("market.market_view_probe")
+def read_market_tab_probe():
+    return read_screen_point_rgb("market.market_tab")
 
 
-def read_market_details_view_probe():
-    return read_screen_point_rgb("market.details_view_probe")
+def is_market_tab_active_pixel(rgb):
+    if rgb is None:
+        return False
+
+    red, green, blue = rgb
+    target_red, target_green, target_blue = MARKET_TAB_ACTIVE_RGB
+    return (
+        abs(red - target_red) <= MARKET_TAB_ACTIVE_TOLERANCE
+        and abs(green - target_green) <= MARKET_TAB_ACTIVE_TOLERANCE
+        and abs(blue - target_blue) <= MARKET_TAB_ACTIVE_TOLERANCE
+        and red > green + 45
+        and green > blue + 60
+    )
+
+
+def is_market_view_active():
+    return is_market_tab_active_pixel(read_market_tab_probe())
 
 
 def ensure_market_view_before_picker_navigation():
     if not get_picker_action_hwnd():
         return False
 
-    market_rgb = read_market_view_probe()
-    details_rgb = read_market_details_view_probe()
-    if is_orange_button_pixel(details_rgb):
+    market_rgb = read_market_tab_probe()
+    if (
+        is_market_tab_active_pixel(market_rgb)
+        and market_current_subtab == MARKET_SUBTAB_DETAILS
+    ):
         return True
 
     append_log_line(
         "market navigation: open market details "
-        f"market_rgb={market_rgb} details_rgb={details_rgb}"
+        f"market_rgb={market_rgb}"
     )
     return open_picker_market_details()
 
@@ -1721,12 +1743,46 @@ def finish_pending_picker_selection(token, row_index, item_name, wait_ok):
 
 
 def open_game_market_details():
-    clicked_market = game.click("market.market_tab")
-    time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
-    clicked_details = game.click("market.details_tab")
-    if clicked_market or clicked_details:
+    return open_game_market_subtab(
+        "market.details_tab",
+        MARKET_SUBTAB_DETAILS,
+    )
+
+
+def open_game_market_lots():
+    return open_game_market_subtab("market.lots_tab", MARKET_SUBTAB_LOTS)
+
+
+def open_game_market_subtab(tab_point_name, subtab_name):
+    global market_current_subtab
+
+    if is_market_view_active():
+        clicked_market = True
+    else:
+        clicked_market = game.click("market.market_tab")
+        if not clicked_market:
+            return False
+        time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
+
+    clicked_tab = game.click(tab_point_name)
+    if clicked_market or clicked_tab:
+        if clicked_tab:
+            market_current_subtab = subtab_name
         reset_market_action_stage()
-    return clicked_market and clicked_details
+    return clicked_market and clicked_tab
+
+
+def reassert_picker_window():
+    if picker_window is not None:
+        show_picker(toggle=False)
+
+
+def schedule_picker_reassert():
+    if root is None:
+        return
+
+    root.after(0, reassert_picker_window)
+    root.after(150, reassert_picker_window)
 
 
 def open_picker_market_details():
@@ -1880,9 +1936,16 @@ def finish_picker_end_press():
 
 
 def handle_right_ctrl_escape():
-    if detect_market_action_stage() != STAGE_QUANTITY:
-        return False
-    return decrease_market_item_quantity()
+    if detect_market_action_stage() == STAGE_QUANTITY:
+        return decrease_market_item_quantity()
+    if market_current_subtab == MARKET_SUBTAB_DETAILS:
+        ok = open_game_market_lots()
+    else:
+        ok = open_game_market_details()
+
+    if ok:
+        schedule_picker_reassert()
+    return ok
 
 
 def sleep_with_stop(seconds, stop_event, mouse_guard=False):
