@@ -29,6 +29,11 @@
     "y": 860,
     "description": "Orange pixel probe after confirming a market order."
   },
+  "market.order_panel_close": {
+    "x": 2533,
+    "y": 680,
+    "description": "Close the market quantity/order panel."
+  },
   "market.quantity_plus": {
     "x": 2008,
     "y": 1106,

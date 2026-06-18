@@ -1195,6 +1195,12 @@ def close_picker_if_target_gone():
         return False
 
     if is_live_game_window(picker_target_hwnd):
+        foreground_hwnd = get_foreground_hwnd()
+        if is_picker_open() and (
+            not foreground_hwnd or not is_game_window(foreground_hwnd)
+        ):
+            hide_picker()
+            return True
         return False
 
     picker_target_hwnd = None
@@ -1536,6 +1542,31 @@ def decrease_market_item_quantity():
     return game.click("market.quantity_minus")
 
 
+def is_market_order_panel_open():
+    return detect_market_action_stage() == STAGE_QUANTITY
+
+
+def close_market_order_panel():
+    if right_shift_order_down:
+        set_order_button_hold(False)
+
+    ok = game.click("market.order_panel_close")
+    if ok:
+        append_log_line("market navigation: closed order panel")
+        reset_market_action_stage()
+        time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
+    else:
+        append_log_line("market navigation: close order panel failed")
+    return ok
+
+
+def ensure_market_order_panel_closed():
+    if not is_market_order_panel_open():
+        return True
+
+    return close_market_order_panel()
+
+
 def read_screen_point_rgb(point_name):
     point = game.screen_point(point_name)
     if point is None:
@@ -1572,6 +1603,9 @@ def ensure_market_view_before_picker_navigation():
     if not get_picker_action_hwnd():
         return False
 
+    if not ensure_market_order_panel_closed():
+        return False
+
     market_rgb = read_market_tab_probe()
     if (
         is_market_tab_active_pixel(market_rgb)
@@ -1583,7 +1617,7 @@ def ensure_market_view_before_picker_navigation():
         "market navigation: open market details "
         f"market_rgb={market_rgb}"
     )
-    return open_picker_market_details()
+    return open_game_market_details()
 
 
 def ensure_market_ready_for_picker_selection():
@@ -1836,6 +1870,9 @@ def handle_market_action_right():
 
 
 def handle_market_action_left():
+    if is_market_order_panel_open():
+        return close_market_order_panel()
+
     reset_market_action_stage()
     return go_back_from_market_card()
 
@@ -1936,8 +1973,9 @@ def finish_picker_end_press():
 
 
 def handle_right_ctrl_escape():
-    if detect_market_action_stage() == STAGE_QUANTITY:
-        return decrease_market_item_quantity()
+    if not ensure_market_order_panel_closed():
+        return False
+
     if market_current_subtab == MARKET_SUBTAB_DETAILS:
         ok = open_game_market_lots()
     else:
@@ -2017,12 +2055,20 @@ def select_salvage_context_disassemble_point(stop_event):
     probe_log_parts = []
 
     while not stop_event.is_set() and is_live_game_window(salvage_action_hwnd):
-        probe_log_parts = []
-        for probe_point, click_point in SALVAGE_CONTEXT_DISASSEMBLE_CHOICES:
-            hit_point, rgb = first_white_screen_sample(probe_point)
-            probe_log_parts.append(f"{probe_point}={rgb}")
-            if hit_point is not None:
-                return click_point
+        top_probe, top_click = SALVAGE_CONTEXT_DISASSEMBLE_CHOICES[0]
+        bottom_probe, bottom_click = SALVAGE_CONTEXT_DISASSEMBLE_CHOICES[1]
+
+        top_hit, top_rgb = first_white_screen_sample(top_probe)
+        bottom_hit, bottom_rgb = first_white_screen_sample(bottom_probe)
+        probe_log_parts = [
+            f"{top_probe}={top_rgb}",
+            f"{bottom_probe}={bottom_rgb}",
+        ]
+
+        if top_hit is not None:
+            return top_click
+        if bottom_hit is not None:
+            return bottom_click
 
         remaining_seconds = deadline - time.monotonic()
         if remaining_seconds <= 0:
@@ -2039,8 +2085,9 @@ def select_salvage_context_disassemble_point(stop_event):
     append_log_line(
         "salvage context probe "
         + " ".join(probe_log_parts)
-        + f" fallback=salvage.context_disassemble elapsed_ms={elapsed_ms}"
+        + f" auto_finish_after_current_step elapsed_ms={elapsed_ms}"
     )
+    request_salvage_finish_current_cycle(cleanup=True)
     return "salvage.context_disassemble"
 
 
@@ -2185,7 +2232,6 @@ def run_salvage_loop(stop_event):
             return
 
         salvage_action_hwnd = hwnd
-        arm_salvage_del_pair(hwnd=hwnd)
         salvage_expected_cursor_pos = None
         salvage_last_item_right_click_at = 0
         root.after(0, hide_picker)
@@ -2301,7 +2347,7 @@ def request_salvage_finish_current_cycle(cleanup=False):
     return True
 
 
-def start_salvage_loop(arm_pair=True):
+def start_salvage_loop(arm_pair=False):
     global salvage_running, salvage_delete_was_down
     global salvage_action_hwnd
     global salvage_cleanup_requested, salvage_restart_after_stop, salvage_arm_after_restart
@@ -2350,9 +2396,7 @@ def handle_salvage_del_press(ignore_latch=False):
     salvage_delete_was_down = delete_down
     salvage_last_delete_handled_at = now
 
-    if salvage_pair_armed:
-        append_log_line("salvage Del pair: second script")
-        run_salvage_second_script()
+    if not ensure_market_order_panel_closed():
         return
 
     if not salvage_running and not get_picker_action_hwnd() and not is_picker_open():
@@ -2360,13 +2404,13 @@ def handle_salvage_del_press(ignore_latch=False):
         hotkeys.pass_delete_once()
         return
 
-    append_log_line("salvage Del pair: first script")
+    append_log_line("salvage Del: script")
     if salvage_running:
-        request_salvage_stop(restart=True, arm_after_restart=True)
+        request_salvage_stop(restart=True, arm_after_restart=False)
         return
 
-    if not start_salvage_loop(arm_pair=True):
-        append_log_line("salvage Del first script start failed")
+    if not start_salvage_loop(arm_pair=False):
+        append_log_line("salvage Del script start failed")
         hotkeys.pass_delete_once()
 
 
@@ -3407,6 +3451,10 @@ def show_picker(toggle=True):
         return
 
     reset_market_action_stage()
+    if not ensure_market_order_panel_closed():
+        return
+    if not open_game_market_details():
+        return
     if picker_items:
         populate_picker()
     else:

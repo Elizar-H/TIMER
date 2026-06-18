@@ -45,6 +45,11 @@ DEFAULT_COORDINATES = {
         860,
         "Orange pixel probe after confirming a market order.",
     ),
+    "market.order_panel_close": _pixel_point(
+        2533,
+        680,
+        "Close the market quantity/order panel.",
+    ),
     "market.quantity_plus": _pixel_point(
         2008,
         1106,
