@@ -202,6 +202,12 @@ PICKER_END_BACKGROUND_HOLD_SECONDS = 0.75
 RIGHT_ARROW_HOLD_SECONDS = 0.09
 PICKER_ARROW_EDGE_HOLD_SECONDS = 0.20
 MARKET_ACTION_STAGE_MAX_AGE_SECONDS = 1.10
+MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS = 2.0
+MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS = 0.005
+MARKET_ORDER_COMPLETE_ORANGE_RGB = (0xB5, 0x4A, 0x03)
+MARKET_ORDER_COMPLETE_ORANGE_TOLERANCE = 45
+MARKET_POST_ORDER_ESCAPE_WAIT_SECONDS = 2.0
+MARKET_POST_ORDER_ESCAPE_POLL_SECONDS = 0.005
 GAME_BUTTON_SAMPLE_OFFSETS = (
     (-70, -10),
     (-45, 12),
@@ -574,6 +580,8 @@ right_arrow_press_at = 0
 right_arrow_hold_active = False
 right_arrow_hold_compensated = False
 right_arrow_last_action_stage = None
+market_order_complete_probe_running = False
+market_order_complete_probe_lock = threading.Lock()
 up_arrow_was_down = False
 up_arrow_press_at = 0
 up_arrow_hold_triggered = False
@@ -1528,6 +1536,137 @@ def decrease_market_item_quantity():
     return game.click("market.quantity_minus")
 
 
+def read_market_view_probe():
+    point = game.screen_point("market.market_view_probe")
+    if point is None:
+        return None
+
+    x, y = point
+    return get_screen_pixel_rgb(x, y)
+
+
+def ensure_market_view_before_picker_navigation():
+    if not get_picker_action_hwnd():
+        return
+
+    rgb = read_market_view_probe()
+    if is_orange_button_pixel(rgb):
+        return
+
+    append_log_line(f"market navigation: esc before picker move rgb={rgb}")
+    tap_key_scancode(VK_ESCAPE, delay=0.010)
+    reset_market_action_stage()
+    time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
+
+
+def is_market_order_complete_orange(rgb):
+    if rgb is None:
+        return False
+
+    red, green, blue = rgb
+    target_red, target_green, target_blue = MARKET_ORDER_COMPLETE_ORANGE_RGB
+    return (
+        abs(red - target_red) <= MARKET_ORDER_COMPLETE_ORANGE_TOLERANCE
+        and abs(green - target_green) <= MARKET_ORDER_COMPLETE_ORANGE_TOLERANCE
+        and abs(blue - target_blue) <= MARKET_ORDER_COMPLETE_ORANGE_TOLERANCE
+        and red > green + 55
+        and green > blue + 20
+    )
+
+
+def read_market_order_complete_probe():
+    point = game.screen_point("market.order_complete_probe")
+    if point is None:
+        return None, None
+
+    x, y = point
+    for offset_x, offset_y in WHITE_PIXEL_SAMPLE_OFFSETS:
+        sample_x = x + offset_x
+        sample_y = y + offset_y
+        rgb = get_screen_pixel_rgb(sample_x, sample_y)
+        if is_market_order_complete_orange(rgb):
+            return (sample_x, sample_y), rgb
+
+    return None, get_screen_pixel_rgb(x, y)
+
+
+def read_market_post_order_escape_probe():
+    point = game.screen_point("market.post_order_escape_probe")
+    if point is None:
+        return None, None
+
+    x, y = point
+    for offset_x, offset_y in WHITE_PIXEL_SAMPLE_OFFSETS:
+        sample_x = x + offset_x
+        sample_y = y + offset_y
+        rgb = get_screen_pixel_rgb(sample_x, sample_y)
+        if is_white_pixel(rgb):
+            return (sample_x, sample_y), rgb
+
+    return None, get_screen_pixel_rgb(x, y)
+
+
+def wait_market_post_order_escape_and_escape():
+    deadline = time.monotonic() + MARKET_POST_ORDER_ESCAPE_WAIT_SECONDS
+    last_rgb = None
+    while time.monotonic() < deadline:
+        if not get_picker_action_hwnd():
+            return False
+
+        hit_point, rgb = read_market_post_order_escape_probe()
+        last_rgb = rgb
+        if hit_point is not None:
+            append_log_line(f"market post order white: esc at {hit_point} rgb={rgb}")
+            tap_key_scancode(VK_ESCAPE, delay=0.010)
+            return True
+
+        time.sleep(MARKET_POST_ORDER_ESCAPE_POLL_SECONDS)
+
+    append_log_line(f"market post order white timeout: last_rgb={last_rgb}")
+    return False
+
+
+def wait_market_order_complete_and_escape():
+    global market_order_complete_probe_running, right_shift_order_down
+
+    try:
+        deadline = time.monotonic() + MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS
+        last_rgb = None
+        while time.monotonic() < deadline:
+            if not get_picker_action_hwnd():
+                return
+
+            hit_point, rgb = read_market_order_complete_probe()
+            last_rgb = rgb
+            if hit_point is not None:
+                append_log_line(f"market order complete: esc at {hit_point} rgb={rgb}")
+                if right_shift_order_down:
+                    send_mouse_button(MOUSEEVENTF_LEFTUP)
+                    right_shift_order_down = False
+                reset_market_action_stage()
+                tap_key_scancode(VK_ESCAPE, delay=0.010)
+                wait_market_post_order_escape_and_escape()
+                return
+
+            time.sleep(MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS)
+
+        append_log_line(f"market order complete probe timeout: last_rgb={last_rgb}")
+    finally:
+        with market_order_complete_probe_lock:
+            market_order_complete_probe_running = False
+
+
+def start_market_order_complete_escape_probe():
+    global market_order_complete_probe_running
+
+    with market_order_complete_probe_lock:
+        if market_order_complete_probe_running:
+            return
+        market_order_complete_probe_running = True
+
+    threading.Thread(target=wait_market_order_complete_and_escape, daemon=True).start()
+
+
 def open_game_market_details():
     clicked_market = game.click("market.market_tab")
     time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
@@ -2145,6 +2284,8 @@ def set_order_button_hold(is_down):
             return False
         ok = send_mouse_button(MOUSEEVENTF_LEFTDOWN)
         right_shift_order_down = ok
+        if ok:
+            start_market_order_complete_escape_probe()
         return ok
 
     was_down = right_shift_order_down
@@ -2936,6 +3077,7 @@ def move_picker_selection(direction):
         next_position = (current_position + direction) % len(item_rows)
         target_index = item_rows[next_position]
 
+    ensure_market_view_before_picker_navigation()
     select_picker_row(target_index, paste=True)
 
 
@@ -2968,6 +3110,7 @@ def move_picker_selection_to_section(direction):
 
     if picker_selected_row_index not in get_picker_item_row_indices():
         target_index = section_first_rows[0] if direction > 0 else section_first_rows[-1]
+        ensure_market_view_before_picker_navigation()
         select_picker_row(target_index, paste=True)
         return
 
@@ -2984,6 +3127,7 @@ def move_picker_selection_to_section(direction):
         target_position = (current_section_position + direction) % len(section_first_rows)
 
     target_index = section_first_rows[target_position]
+    ensure_market_view_before_picker_navigation()
     select_picker_row(target_index, paste=True)
 
 

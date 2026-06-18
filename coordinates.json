@@ -24,6 +24,16 @@
     "y": 1410,
     "description": "Create order button in the market quantity dialog."
   },
+  "market.order_complete_probe": {
+    "x": 1930,
+    "y": 860,
+    "description": "Orange pixel probe after confirming a market order."
+  },
+  "market.post_order_escape_probe": {
+    "x": 2678,
+    "y": 248,
+    "description": "White pixel probe after the first escape from a completed market order."
+  },
   "market.quantity_plus": {
     "x": 2008,
     "y": 1106,
@@ -43,6 +53,11 @@
     "x": 1617,
     "y": 190,
     "description": "Details tab in the market view."
+  },
+  "market.market_view_probe": {
+    "x": 1458,
+    "y": 0,
+    "description": "Orange pixel probe that indicates the market list view is active."
   },
   "market.sell_button": {
     "x": 1409,
