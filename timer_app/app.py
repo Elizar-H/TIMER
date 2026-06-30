@@ -620,6 +620,7 @@ salvage_action_hwnd = 0
 salvage_pair_hwnd = 0
 market_action_state = MarketActionState(MARKET_ACTION_STAGE_MAX_AGE_SECONDS)
 picker_render_signature = None
+picker_refresh_needs_decor_selection = False
 last_picker_paste_at = 0
 last_picker_paste_name = None
 picker_refresh_paste_pending_name = None
@@ -886,7 +887,7 @@ def build_picker_items_with_retries():
 def refresh_picker_items(force=False):
     global picker_items, picker_last_refresh, picker_refreshing
     global picker_last_success_at, picker_last_refresh_ms, picker_last_item_count
-    global picker_last_refresh_note
+    global picker_last_refresh_note, picker_refresh_needs_decor_selection
 
     now = time.monotonic()
     if not force and picker_items and now - picker_last_refresh < PICKER_REFRESH_SECONDS:
@@ -908,6 +909,7 @@ def refresh_picker_items(force=False):
         picker_last_refresh = now
         picker_last_refresh_ms = timings.get("total_ms")
         picker_last_item_count = count_real_picker_items(fresh_items)
+        picker_refresh_needs_decor_selection = has_picker_decor_items(fresh_items)
         if has_real_picker_items(fresh_items):
             picker_last_success_at = time.monotonic()
             picker_last_refresh_note = "свежие"
@@ -950,6 +952,16 @@ def save_picker_cache():
         save_picker_cache_file(picker_items)
     except Exception as e:
         log_error("picker_cache", f"Picker cache save failed: {e}")
+
+
+def has_picker_decor_items(items):
+    return any(
+        isinstance(item, dict)
+        and not item.get("separator")
+        and not item.get("decor_prices")
+        and get_picker_item_kind(item) == "decor"
+        for item in items or []
+    )
 
 
 def repaint_picker_if_visible():
@@ -2651,6 +2663,37 @@ def get_selected_picker_item_name():
     return item.get("name")
 
 
+def get_first_decor_picker_row_index():
+    for row_index, row in enumerate(picker_display_rows):
+        item = row.get("item")
+        if (
+            row.get("type") == "item"
+            and item
+            and get_picker_item_kind(item) == "decor"
+        ):
+            return row_index
+
+    return None
+
+
+def select_first_decor_picker_row_after_refresh():
+    global picker_hover_row_index, picker_refresh_needs_decor_selection
+    global picker_selected_row_index
+
+    if not picker_refresh_needs_decor_selection:
+        return False
+
+    row_index = get_first_decor_picker_row_index()
+    if row_index is None:
+        picker_refresh_needs_decor_selection = False
+        return False
+
+    picker_selected_row_index = row_index
+    picker_hover_row_index = row_index
+    picker_refresh_needs_decor_selection = False
+    return True
+
+
 def clear_pending_picker_refresh_paste():
     global picker_refresh_paste_pending_name, picker_refresh_paste_pending_row_index
 
@@ -3214,6 +3257,7 @@ def draw_picker_canvas_rows():
 
     picker_display_rows[:] = rows
     picker_total_content_height = total_height
+    decor_row_selected = select_first_decor_picker_row_after_refresh()
     picker_canvas.create_rectangle(0, 0, width, max(total_height, 1), fill="#0b0f14", outline="")
 
     for row_index, row in enumerate(rows):
@@ -3236,6 +3280,8 @@ def draw_picker_canvas_rows():
 
     picker_canvas.configure(scrollregion=(0, 0, width, max(total_height, 1)))
     picker_render_signature = get_picker_render_signature()
+    if decor_row_selected and picker_selected_row_index is not None:
+        scroll_picker_row_into_view(picker_display_rows[picker_selected_row_index])
 
 
 def show_picker_message(text):
@@ -3604,7 +3650,7 @@ def show_picker(toggle=True):
     if not open_game_market_details():
         return
     if picker_items:
-        populate_picker()
+        populate_picker(sync_selected_name=picker_refresh_needs_decor_selection)
     else:
         show_picker_message("Загрузка...")
 
