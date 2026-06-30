@@ -76,6 +76,7 @@ from timer_app.picker.items import (
 )
 from timer_app.picker.paste import normalize_game_search_text
 from timer_app.winapi import (
+    GWL_EXSTYLE,
     MOUSEEVENTF_LEFTDOWN,
     MOUSEEVENTF_LEFTUP,
     POINT,
@@ -95,6 +96,8 @@ from timer_app.winapi import (
     VK_RIGHT,
     VK_UP,
     VK_V,
+    WS_EX_NOACTIVATE,
+    WS_EX_TRANSPARENT,
     enable_dpi_awareness,
     get_cursor_pos,
     get_screen_pixel_rgb,
@@ -549,6 +552,7 @@ second_monitor_border_items = []
 second_monitor_rect = None
 second_monitor_alert_visible = False
 second_monitor_alert_alpha = None
+alert_last_foreground_hwnd = 0
 picker_items = []
 picker_window = None
 picker_hwnd = None
@@ -1067,8 +1071,80 @@ def update_label():
     root.after(ALERT_UPDATE_MS, update_label)
 
 
-def update_colors():
+def is_monitor_alert_hwnd(hwnd):
+    if not hwnd:
+        return False
+
+    for window in (primary_monitor_alert, second_monitor_alert):
+        if window is None:
+            continue
+        try:
+            if get_window_hwnd(window) == hwnd:
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
+def remember_alert_foreground(hwnd):
+    global alert_last_foreground_hwnd
+
+    if hwnd and is_live_window(hwnd) and not is_own_overlay_hwnd(hwnd):
+        alert_last_foreground_hwnd = hwnd
+
+
+def restore_focus_from_alert_window(hwnd):
+    if not is_monitor_alert_hwnd(hwnd):
+        return
+
+    if (
+        alert_last_foreground_hwnd
+        and is_live_window(alert_last_foreground_hwnd)
+        and not is_own_overlay_hwnd(alert_last_foreground_hwnd)
+    ):
+        force_foreground_window(alert_last_foreground_hwnd)
+
+
+def get_effective_foreground_for_alerts():
     foreground_hwnd = get_foreground_hwnd()
+    if is_monitor_alert_hwnd(foreground_hwnd):
+        restore_focus_from_alert_window(foreground_hwnd)
+        if alert_last_foreground_hwnd and is_live_window(alert_last_foreground_hwnd):
+            return alert_last_foreground_hwnd
+        return get_foreground_hwnd()
+
+    remember_alert_foreground(foreground_hwnd)
+    return foreground_hwnd
+
+
+def keep_monitor_alert_passive(window):
+    if window is None:
+        return
+
+    try:
+        hwnd = get_window_hwnd(window)
+        ex_style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        required_style = WS_EX_TRANSPARENT | WS_EX_NOACTIVATE
+        if (ex_style & required_style) != required_style:
+            apply_no_focus_clickthrough(window)
+
+        ctypes.windll.user32.SetWindowPos(
+            hwnd,
+            -1,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+        restore_focus_from_alert_window(get_foreground_hwnd())
+    except Exception:
+        pass
+
+
+def update_colors():
+    foreground_hwnd = get_effective_foreground_for_alerts()
     game_foreground = is_game_window(foreground_hwnd)
 
     if not is_alert_window(remaining_seconds):
@@ -1174,6 +1250,7 @@ def set_primary_monitor_alert(is_visible, pulse=0):
         primary_monitor_alert.attributes("-alpha", alpha)
         primary_monitor_alert_alpha = alpha
 
+    keep_monitor_alert_passive(primary_monitor_alert)
     if not primary_monitor_alert_visible or primary_monitor_alert.state() == "withdrawn":
         primary_monitor_alert.attributes("-topmost", True)
         try:
@@ -1181,6 +1258,7 @@ def set_primary_monitor_alert(is_visible, pulse=0):
         except Exception:
             pass
         show_tk_window_on_rect_no_activate(primary_monitor_alert, primary_monitor_rect)
+        keep_monitor_alert_passive(primary_monitor_alert)
         primary_monitor_alert_visible = True
 
 
@@ -1206,12 +1284,14 @@ def set_second_monitor_alert(is_visible, pulse=0):
         second_monitor_alert.attributes("-alpha", alpha)
         second_monitor_alert_alpha = alpha
 
+    keep_monitor_alert_passive(second_monitor_alert)
     if not second_monitor_alert_visible or second_monitor_alert.state() == "withdrawn":
         try:
             apply_no_focus_clickthrough(second_monitor_alert)
         except Exception:
             pass
         show_tk_window_on_rect_no_activate(second_monitor_alert, second_monitor_rect)
+        keep_monitor_alert_passive(second_monitor_alert)
         second_monitor_alert_visible = True
 
 
@@ -1755,6 +1835,10 @@ def wait_market_order_complete_and_escape():
         target_hwnd = find_known_game_hwnd()
         focus_wait_logged = False
         while time.monotonic() < deadline:
+            # The market order is submitted on mouse-up, so do not time out while holding.
+            if right_shift_order_down:
+                deadline = time.monotonic() + MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS
+
             target_hwnd = ensure_game_foreground_for_escape(target_hwnd)
             if not target_hwnd:
                 if not focus_wait_logged:
@@ -2549,6 +2633,8 @@ def set_order_button_hold(is_down):
     right_shift_order_down = False
     if was_down:
         reset_market_action_stage()
+        if ok:
+            start_market_order_complete_escape_probe()
     return ok
 
 
@@ -3938,28 +4024,10 @@ def keep_on_top():
         keep_picker_on_top()
 
         if primary_monitor_alert is not None and primary_monitor_alert.state() != "withdrawn":
-            primary_hwnd = get_window_hwnd(primary_monitor_alert)
-            ctypes.windll.user32.SetWindowPos(
-                primary_hwnd,
-                -1,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )
+            keep_monitor_alert_passive(primary_monitor_alert)
 
         if second_monitor_alert is not None and second_monitor_alert.state() != "withdrawn":
-            second_hwnd = get_window_hwnd(second_monitor_alert)
-            ctypes.windll.user32.SetWindowPos(
-                second_hwnd,
-                -1,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )
+            keep_monitor_alert_passive(second_monitor_alert)
 
         hwnd = get_window_hwnd(root)
         ctypes.windll.user32.SetWindowPos(
