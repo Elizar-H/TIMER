@@ -30,6 +30,11 @@ DEFAULT_COORDINATES = {
         607,
         "Open the selected market item card.",
     ),
+    "market.second_search_result": _pixel_point(
+        2074,
+        780,
+        "Second item in the in-game search result list.",
+    ),
     "market.buy_button": _pixel_point(
         265,
         1953,

@@ -254,6 +254,7 @@ PASTE_BETWEEN_KEYS_DELAY = 0.002
 PASTE_BEFORE_ENTER_DELAY = 0.040
 PASTE_ENTER_KEY_DELAY = 0.005
 PASTE_SEARCH_CLICKS = 2
+SECOND_SEARCH_RESULT_ITEM_NAMES = {"око"}
 MOUSE_CLICK_DELAY = 0.003
 ITEM_PICKER_TITLE = "Crossout Item Picker"
 # Вид основной "челки"
@@ -2594,6 +2595,13 @@ def restore_picker_after_paste():
         pass
 
 
+def should_click_second_search_result(item_name):
+    return (
+        normalize_game_search_text(item_name).casefold()
+        in SECOND_SEARCH_RESULT_ITEM_NAMES
+    )
+
+
 def paste_item_name(name):
     global last_picker_paste_at, last_picker_paste_name, picker_target_hwnd
 
@@ -2629,12 +2637,22 @@ def paste_item_name(name):
             tap_key(VK_BACK)
             time.sleep(PASTE_AFTER_CLEAR_DELAY)
             send_ctrl_key(VK_V, PASTE_BETWEEN_KEYS_DELAY)
-            if cursor_saved:
-                ctypes.windll.user32.SetCursorPos(old_cursor.x, old_cursor.y)
-                cursor_saved = False
             time.sleep(PASTE_BEFORE_ENTER_DELAY)
-            tap_key(VK_RETURN, delay=PASTE_ENTER_KEY_DELAY)
-            _log_direct("do_paste: click + clear + ctrl+v + cursor restore + enter sent")
+            if should_click_second_search_result(name):
+                result_click_ok = game.click(
+                    "market.second_search_result",
+                    hwnd=target_hwnd,
+                )
+                _log_direct(
+                    "do_paste: click + clear + ctrl+v "
+                    f"+ second result click={result_click_ok}"
+                )
+            else:
+                if cursor_saved:
+                    ctypes.windll.user32.SetCursorPos(old_cursor.x, old_cursor.y)
+                    cursor_saved = False
+                tap_key(VK_RETURN, delay=PASTE_ENTER_KEY_DELAY)
+                _log_direct("do_paste: click + clear + ctrl+v + cursor restore + enter sent")
         except Exception as e:
             _log_direct(f"do_paste: EXCEPTION {e}")
         finally:
@@ -2663,6 +2681,44 @@ def get_selected_picker_item_name():
     return item.get("name")
 
 
+def get_picker_item_match_name(name):
+    if not name:
+        return None
+
+    match_name = normalize_game_search_text(name)
+    return match_name or None
+
+
+def find_picker_row_by_item_name(item_name):
+    match_name = get_picker_item_match_name(item_name)
+    if not match_name:
+        return None
+
+    for row_index, row in enumerate(picker_display_rows):
+        item = row.get("item")
+        if row.get("type") != "item" or not item:
+            continue
+
+        if get_picker_item_match_name(item.get("name")) == match_name:
+            return row_index
+
+    return None
+
+
+def restore_picker_selection_by_name(item_name):
+    global picker_selected_row_index, picker_hover_row_index
+
+    row_index = find_picker_row_by_item_name(item_name)
+    if row_index is None:
+        picker_selected_row_index = None
+        picker_hover_row_index = None
+        return False
+
+    picker_selected_row_index = row_index
+    picker_hover_row_index = row_index
+    return True
+
+
 def get_first_decor_picker_row_index():
     for row_index, row in enumerate(picker_display_rows):
         item = row.get("item")
@@ -2681,6 +2737,10 @@ def select_first_decor_picker_row_after_refresh():
     global picker_selected_row_index
 
     if not picker_refresh_needs_decor_selection:
+        return False
+
+    if get_selected_picker_item_name():
+        picker_refresh_needs_decor_selection = False
         return False
 
     row_index = get_first_decor_picker_row_index()
@@ -3245,8 +3305,9 @@ def draw_picker_item_canvas(row, is_hover=False, is_pending=False):
         )
 
 
-def draw_picker_canvas_rows():
+def draw_picker_canvas_rows(selected_item_name=None, restore_selection=False):
     global picker_total_content_height, picker_render_signature
+    global picker_refresh_needs_decor_selection
 
     if picker_canvas is None:
         return
@@ -3257,6 +3318,11 @@ def draw_picker_canvas_rows():
 
     picker_display_rows[:] = rows
     picker_total_content_height = total_height
+    if restore_selection:
+        had_selected_item = get_picker_item_match_name(selected_item_name) is not None
+        selection_restored = restore_picker_selection_by_name(selected_item_name)
+        if had_selected_item and not selection_restored:
+            picker_refresh_needs_decor_selection = False
     decor_row_selected = select_first_decor_picker_row_after_refresh()
     picker_canvas.create_rectangle(0, 0, width, max(total_height, 1), fill="#0b0f14", outline="")
 
@@ -3316,11 +3382,15 @@ def populate_picker(force=False, sync_selected_name=False):
             flush_pending_picker_refresh_paste()
         return
 
+    selected_item_name = get_selected_picker_item_name()
     clear_picker_rows()
     if not picker_items:
         show_picker_message("Загрузка...")
     else:
-        draw_picker_canvas_rows()
+        draw_picker_canvas_rows(
+            selected_item_name=selected_item_name,
+            restore_selection=True,
+        )
 
     if picker_status is not None:
         picker_status.configure(text="")
