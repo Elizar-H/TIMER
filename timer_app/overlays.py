@@ -1,4 +1,5 @@
 import ctypes
+from ctypes import wintypes
 import math
 import time
 import tkinter as tk
@@ -10,6 +11,8 @@ from timer_app.windows import (
     get_window_hwnd,
     show_tk_window_no_activate,
 )
+
+RGN_OR = 2
 
 
 def calculate_alert_pulse(pattern):
@@ -57,6 +60,56 @@ def show_overlay_window(root):
 
 def apply_window_region(root):
     pass
+
+
+def apply_monitor_border_region(window, width, height, thickness):
+    width = int(width)
+    height = int(height)
+    thickness = max(1, min(int(thickness), width, height))
+
+    gdi32 = ctypes.windll.gdi32
+    user32 = ctypes.windll.user32
+    handle_type = wintypes.HANDLE
+
+    create_rect_rgn = gdi32.CreateRectRgn
+    create_rect_rgn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    create_rect_rgn.restype = handle_type
+
+    combine_rgn = gdi32.CombineRgn
+    combine_rgn.argtypes = [handle_type, handle_type, handle_type, ctypes.c_int]
+
+    delete_object = gdi32.DeleteObject
+    delete_object.argtypes = [handle_type]
+
+    set_window_rgn = user32.SetWindowRgn
+    set_window_rgn.argtypes = [wintypes.HWND, handle_type, wintypes.BOOL]
+
+    region = create_rect_rgn(0, 0, 0, 0)
+    parts = [
+        create_rect_rgn(0, 0, width, thickness),
+        create_rect_rgn(0, height - thickness, width, height),
+        create_rect_rgn(0, 0, thickness, height),
+        create_rect_rgn(width - thickness, 0, width, height),
+    ]
+
+    try:
+        if not region or any(not part for part in parts):
+            raise ctypes.WinError()
+
+        for part in parts:
+            if not combine_rgn(region, region, part, RGN_OR):
+                raise ctypes.WinError()
+
+        hwnd = get_window_hwnd(window)
+        if not set_window_rgn(hwnd, region, True):
+            raise ctypes.WinError()
+        region = None
+    finally:
+        for part in parts:
+            if part:
+                delete_object(part)
+        if region:
+            delete_object(region)
 
 
 def create_monitor_alert_window(
@@ -117,6 +170,7 @@ def create_monitor_alert_window(
             height,
             SWP_NOACTIVATE,
         )
+        apply_monitor_border_region(alert_window, width, height, thickness)
     except Exception as error:
         log_error_callback(log_context, f"{log_message}: {error}")
 

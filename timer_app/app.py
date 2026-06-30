@@ -540,10 +540,14 @@ primary_monitor_alert = None
 primary_monitor_canvas = None
 primary_monitor_border_items = []
 primary_monitor_rect = None
+primary_monitor_alert_visible = False
+primary_monitor_alert_alpha = None
 second_monitor_alert = None
 second_monitor_canvas = None
 second_monitor_border_items = []
 second_monitor_rect = None
+second_monitor_alert_visible = False
+second_monitor_alert_alpha = None
 picker_items = []
 picker_window = None
 picker_hwnd = None
@@ -618,6 +622,8 @@ market_action_state = MarketActionState(MARKET_ACTION_STAGE_MAX_AGE_SECONDS)
 picker_render_signature = None
 last_picker_paste_at = 0
 last_picker_paste_name = None
+picker_refresh_paste_pending_name = None
+picker_refresh_paste_pending_row_index = None
 last_alert_context_hwnd = None
 single_instance_mutex = None
 overlay_width = BASE_NOTCH_WIDTH
@@ -948,7 +954,7 @@ def save_picker_cache():
 
 def repaint_picker_if_visible():
     if picker_window is not None:
-        populate_picker()
+        populate_picker(sync_selected_name=True)
 
 
 def refresh_picker_and_repaint(force=False):
@@ -1060,13 +1066,6 @@ def update_colors():
         return
 
     pulse = get_alert_pulse()
-    if pulse <= 0:
-        set_notch_visible(False)
-        set_alert_visible(False)
-        set_primary_monitor_alert(False)
-        set_second_monitor_alert(False)
-        return
-
     primary_active = is_window_on_primary_monitor(foreground_hwnd, primary_monitor_rect)
 
     if game_foreground:
@@ -1088,6 +1087,13 @@ def update_colors():
 
 def get_alert_pulse():
     return calculate_alert_pulse(ALERT_PULSE_PATTERN)
+
+
+def get_monitor_alert_alpha(min_alpha, max_alpha, pulse):
+    if pulse <= 0:
+        return 0
+
+    return get_pulse_alpha(min_alpha, max_alpha, pulse)
 
 
 def set_notch_colors(bg, fg, alpha):
@@ -1134,40 +1140,66 @@ def set_alert_visible(is_visible, pulse=0):
 
 
 def set_primary_monitor_alert(is_visible, pulse=0):
+    global primary_monitor_alert_alpha, primary_monitor_alert_visible
+
     if primary_monitor_alert is None:
         return
 
-    if is_visible:
+    if not is_visible:
+        if primary_monitor_alert_visible or primary_monitor_alert.state() != "withdrawn":
+            primary_monitor_alert.withdraw()
+        primary_monitor_alert_visible = False
+        primary_monitor_alert_alpha = None
+        return
+
+    alpha = get_monitor_alert_alpha(
+        PRIMARY_MONITOR_MIN_ALPHA,
+        PRIMARY_MONITOR_ALPHA,
+        pulse,
+    )
+    if primary_monitor_alert_alpha != alpha:
+        primary_monitor_alert.attributes("-alpha", alpha)
+        primary_monitor_alert_alpha = alpha
+
+    if not primary_monitor_alert_visible or primary_monitor_alert.state() == "withdrawn":
         primary_monitor_alert.attributes("-topmost", True)
-        primary_monitor_alert.attributes(
-            "-alpha",
-            get_pulse_alpha(PRIMARY_MONITOR_MIN_ALPHA, PRIMARY_MONITOR_ALPHA, pulse),
-        )
         try:
             apply_no_focus_clickthrough(primary_monitor_alert)
         except Exception:
             pass
         show_tk_window_on_rect_no_activate(primary_monitor_alert, primary_monitor_rect)
-    else:
-        primary_monitor_alert.withdraw()
+        primary_monitor_alert_visible = True
 
 
 def set_second_monitor_alert(is_visible, pulse=0):
+    global second_monitor_alert_alpha, second_monitor_alert_visible
+
     if second_monitor_alert is None:
         return
 
-    if is_visible:
-        second_monitor_alert.attributes(
-            "-alpha",
-            get_pulse_alpha(SECOND_MONITOR_MIN_ALPHA, SECOND_MONITOR_ALPHA, pulse),
-        )
+    if not is_visible:
+        if second_monitor_alert_visible or second_monitor_alert.state() != "withdrawn":
+            second_monitor_alert.withdraw()
+        second_monitor_alert_visible = False
+        second_monitor_alert_alpha = None
+        return
+
+    alpha = get_monitor_alert_alpha(
+        SECOND_MONITOR_MIN_ALPHA,
+        SECOND_MONITOR_ALPHA,
+        pulse,
+    )
+    if second_monitor_alert_alpha != alpha:
+        second_monitor_alert.attributes("-alpha", alpha)
+        second_monitor_alert_alpha = alpha
+
+    if not second_monitor_alert_visible or second_monitor_alert.state() == "withdrawn":
         try:
             apply_no_focus_clickthrough(second_monitor_alert)
         except Exception:
             pass
         show_tk_window_on_rect_no_activate(second_monitor_alert, second_monitor_rect)
-    else:
-        second_monitor_alert.withdraw()
+        second_monitor_alert_visible = True
 
 
 def set_second_monitor_border_color(color):
@@ -2602,6 +2634,87 @@ def paste_item_name(name):
     threading.Thread(target=do_paste, daemon=True).start()
 
 
+def get_selected_picker_item_name():
+    if picker_selected_row_index is None:
+        return None
+    if (
+        picker_selected_row_index < 0
+        or picker_selected_row_index >= len(picker_display_rows)
+    ):
+        return None
+
+    row = picker_display_rows[picker_selected_row_index]
+    item = row.get("item")
+    if row.get("type") != "item" or not item:
+        return None
+
+    return item.get("name")
+
+
+def clear_pending_picker_refresh_paste():
+    global picker_refresh_paste_pending_name, picker_refresh_paste_pending_row_index
+
+    picker_refresh_paste_pending_name = None
+    picker_refresh_paste_pending_row_index = None
+
+
+def is_picker_refresh_paste_ready():
+    if picker_window is None or picker_window.state() == "withdrawn":
+        return False
+    if not is_picker_window_visible_fast():
+        return False
+    if not get_picker_action_hwnd():
+        return False
+    return not is_market_order_complete_probe_running()
+
+
+def flush_pending_picker_refresh_paste():
+    global picker_refresh_paste_pending_name
+
+    if not picker_refresh_paste_pending_name:
+        return False
+    if not is_picker_refresh_paste_ready():
+        return False
+
+    selected_name = get_selected_picker_item_name()
+    if (
+        selected_name
+        and picker_refresh_paste_pending_row_index == picker_selected_row_index
+    ):
+        picker_refresh_paste_pending_name = normalize_game_search_text(selected_name)
+
+    name = picker_refresh_paste_pending_name
+    if not name or name == last_picker_paste_name:
+        clear_pending_picker_refresh_paste()
+        return False
+
+    if not ensure_market_ready_for_picker_selection():
+        return False
+
+    clear_pending_picker_refresh_paste()
+    reset_market_action_stage()
+    paste_item_name(name)
+    return True
+
+
+def sync_selected_picker_name_after_refresh():
+    global picker_refresh_paste_pending_name, picker_refresh_paste_pending_row_index
+
+    selected_name = get_selected_picker_item_name()
+    if not selected_name:
+        clear_pending_picker_refresh_paste()
+        return
+
+    selected_name = normalize_game_search_text(selected_name)
+    if not selected_name or selected_name == last_picker_paste_name:
+        clear_pending_picker_refresh_paste()
+        return
+
+    picker_refresh_paste_pending_name = selected_name
+    picker_refresh_paste_pending_row_index = picker_selected_row_index
+    flush_pending_picker_refresh_paste()
+
+
 def get_picker_content_height():
     if picker_total_content_height > 0:
         return picker_total_content_height
@@ -3144,7 +3257,7 @@ def show_picker_message(text):
     picker_canvas.configure(scrollregion=(0, 0, width, 34))
 
 
-def populate_picker(force=False):
+def populate_picker(force=False, sync_selected_name=False):
     if picker_canvas is None:
         return
 
@@ -3153,6 +3266,8 @@ def populate_picker(force=False):
             picker_status.configure(text="")
         if picker_window is not None and picker_window.state() != "withdrawn":
             position_picker_window()
+        if sync_selected_name:
+            flush_pending_picker_refresh_paste()
         return
 
     clear_picker_rows()
@@ -3166,6 +3281,9 @@ def populate_picker(force=False):
 
     if picker_window is not None and picker_window.state() != "withdrawn":
         position_picker_window()
+
+    if sync_selected_name:
+        sync_selected_picker_name_after_refresh()
 
 
 def get_picker_canvas_row_at(canvas_y):
@@ -3226,6 +3344,7 @@ def select_picker_row(row_index, paste=True):
     scroll_picker_row_into_view(row)
     draw_picker_hover(row_index)
     if paste:
+        clear_pending_picker_refresh_paste()
         item_name = item["name"]
         if begin_pending_picker_selection(row_index, item_name):
             return
@@ -3494,6 +3613,7 @@ def show_picker(toggle=True):
     picker_hwnd = get_window_hwnd(picker_window)
     sync_picker_navigation_hotkeys()
     update_picker_timer_label()
+    flush_pending_picker_refresh_paste()
 
     if not has_real_picker_items(picker_items) and not picker_refreshing:
         threading.Thread(
@@ -3631,6 +3751,7 @@ def check_hotkeys():
             else:
                 sync_picker_navigation_hotkeys()
 
+    flush_pending_picker_refresh_paste()
     sync_picker_navigation_hotkeys()
     root.after(50, check_hotkeys)
 
