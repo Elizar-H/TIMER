@@ -1576,7 +1576,17 @@ def detect_market_action_stage():
 
 
 def open_selected_market_card():
-    return game.click("market.open_card")
+    point_name = "market.open_card"
+    if should_open_second_search_result(last_picker_paste_name):
+        point_name = "market.second_search_result"
+
+    ok = game.click(point_name)
+    if point_name != "market.open_card":
+        append_log_line(
+            "market navigation: open second search result "
+            f"name={last_picker_paste_name!r} ok={ok}"
+        )
+    return ok
 
 
 def go_back_from_market_card():
@@ -1718,15 +1728,40 @@ def read_market_order_complete_probe():
     return None, get_screen_pixel_rgb(x, y)
 
 
+def ensure_game_foreground_for_escape(preferred_hwnd=0):
+    foreground_hwnd = get_picker_action_hwnd()
+    if foreground_hwnd:
+        return foreground_hwnd
+
+    candidates = (
+        preferred_hwnd,
+        picker_target_hwnd,
+        last_alert_context_hwnd,
+        find_game_window(),
+    )
+    for hwnd in candidates:
+        if hwnd and is_live_game_window(hwnd) and force_foreground_window(hwnd):
+            return hwnd
+
+    return 0
+
+
 def wait_market_order_complete_and_escape():
     global market_order_complete_probe_running, right_shift_order_down
 
     try:
         deadline = time.monotonic() + MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS
         last_rgb = None
+        target_hwnd = find_known_game_hwnd()
+        focus_wait_logged = False
         while time.monotonic() < deadline:
-            if not get_picker_action_hwnd():
-                return
+            target_hwnd = ensure_game_foreground_for_escape(target_hwnd)
+            if not target_hwnd:
+                if not focus_wait_logged:
+                    append_log_line("market order complete probe: waiting for game focus")
+                    focus_wait_logged = True
+                time.sleep(MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS)
+                continue
 
             hit_point, rgb = read_market_order_complete_probe()
             last_rgb = rgb
@@ -1736,6 +1771,10 @@ def wait_market_order_complete_and_escape():
                     send_mouse_button(MOUSEEVENTF_LEFTUP)
                     right_shift_order_down = False
                 reset_market_action_stage()
+                target_hwnd = ensure_game_foreground_for_escape(target_hwnd)
+                if not target_hwnd:
+                    append_log_line("market order complete: esc skipped, game focus unavailable")
+                    return
                 tap_key_scancode(VK_ESCAPE, delay=0.010)
                 time.sleep(MARKET_ORDER_COMPLETE_ESC_REPEAT_DELAY_SECONDS)
                 tap_key_scancode(VK_ESCAPE, delay=0.010)
@@ -2595,7 +2634,10 @@ def restore_picker_after_paste():
         pass
 
 
-def should_click_second_search_result(item_name):
+def should_open_second_search_result(item_name):
+    if not item_name:
+        return False
+
     return (
         normalize_game_search_text(item_name).casefold()
         in SECOND_SEARCH_RESULT_ITEM_NAMES
@@ -2638,21 +2680,11 @@ def paste_item_name(name):
             time.sleep(PASTE_AFTER_CLEAR_DELAY)
             send_ctrl_key(VK_V, PASTE_BETWEEN_KEYS_DELAY)
             time.sleep(PASTE_BEFORE_ENTER_DELAY)
-            if should_click_second_search_result(name):
-                result_click_ok = game.click(
-                    "market.second_search_result",
-                    hwnd=target_hwnd,
-                )
-                _log_direct(
-                    "do_paste: click + clear + ctrl+v "
-                    f"+ second result click={result_click_ok}"
-                )
-            else:
-                if cursor_saved:
-                    ctypes.windll.user32.SetCursorPos(old_cursor.x, old_cursor.y)
-                    cursor_saved = False
-                tap_key(VK_RETURN, delay=PASTE_ENTER_KEY_DELAY)
-                _log_direct("do_paste: click + clear + ctrl+v + cursor restore + enter sent")
+            if cursor_saved:
+                ctypes.windll.user32.SetCursorPos(old_cursor.x, old_cursor.y)
+                cursor_saved = False
+            tap_key(VK_RETURN, delay=PASTE_ENTER_KEY_DELAY)
+            _log_direct("do_paste: click + clear + ctrl+v + cursor restore + enter sent")
         except Exception as e:
             _log_direct(f"do_paste: EXCEPTION {e}")
         finally:
