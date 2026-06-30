@@ -2465,16 +2465,16 @@ def handle_salvage_del_press(ignore_latch=False):
     salvage_delete_was_down = delete_down
     salvage_last_delete_handled_at = now
 
+    if not salvage_running and not is_picker_open():
+        append_log_line("salvage Del ignored: picker is closed")
+        hotkeys.pass_delete_once()
+        return
+
     if not salvage_running and not wait_market_order_complete_probe_if_running():
         append_log_line("salvage Del skipped: order complete probe wait failed")
         return
 
     if not ensure_market_order_panel_closed():
-        return
-
-    if not salvage_running and not get_picker_action_hwnd() and not is_picker_open():
-        append_log_line("salvage Del ignored: picker is closed")
-        hotkeys.pass_delete_once()
         return
 
     append_log_line("salvage Del: script")
