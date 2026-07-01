@@ -40,6 +40,16 @@ DEFAULT_COORDINATES = {
         1953,
         "Buy button on a market item card.",
     ),
+    "market.safe_buy_ready_probe": _pixel_point(
+        2044,
+        1410,
+        "White pixel probe confirming the market buy dialog is open.",
+    ),
+    "market.order_quantity_field": _pixel_point(
+        1910,
+        1100,
+        "Quantity input field in the market buy dialog.",
+    ),
     "market.order_button": _pixel_point(
         1978,
         1410,

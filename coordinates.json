@@ -24,6 +24,16 @@
     "y": 1953,
     "description": "Buy button on a market item card."
   },
+  "market.safe_buy_ready_probe": {
+    "x": 2044,
+    "y": 1410,
+    "description": "White pixel probe confirming the market buy dialog is open."
+  },
+  "market.order_quantity_field": {
+    "x": 1910,
+    "y": 1100,
+    "description": "Quantity input field in the market buy dialog."
+  },
   "market.order_button": {
     "x": 1978,
     "y": 1410,

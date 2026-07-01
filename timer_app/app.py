@@ -45,6 +45,10 @@ from timer_app.crossout import (
 from timer_app.game import GameActions
 from timer_app.hotkeys import HotkeyWorker
 from timer_app.log import append_log_line, log_error
+from timer_app.market_sell_reader import (
+    format_price_from_cents,
+    wait_for_valid_sell_offer,
+)
 from timer_app.overlays import (
     apply_window_region as apply_overlay_window_region,
     calculate_alert_pulse,
@@ -87,6 +91,7 @@ from timer_app.winapi import (
     SW_SHOWNOACTIVATE,
     VK_A,
     VK_BACK,
+    VK_C,
     VK_DELETE,
     VK_DOWN,
     VK_END,
@@ -209,6 +214,12 @@ MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS = 0.005
 MARKET_ORDER_COMPLETE_ORANGE_RGB = (0xB5, 0x4A, 0x03)
 MARKET_ORDER_COMPLETE_ORANGE_TOLERANCE = 45
 MARKET_ORDER_COMPLETE_ESC_REPEAT_DELAY_SECONDS = 0.020
+MARKET_SAFE_BUY_WAIT_SECONDS = 0.80
+MARKET_SAFE_BUY_POLL_SECONDS = 0.040
+MARKET_CLIPBOARD_PRICE_TIMEOUT_SECONDS = 1.0
+MARKET_CLIPBOARD_COPY_INTERVAL_SECONDS = 0.04
+MARKET_CLIPBOARD_COPY_SETTLE_SECONDS = 0.015
+MARKET_SAFE_BUY_ESC_REPEAT_DELAY_SECONDS = 0.020
 MARKET_TAB_ACTIVE_RGB = (0xFF, 0x99, 0x00)
 MARKET_TAB_ACTIVE_TOLERANCE = 55
 MARKET_SUBTAB_DETAILS = "details"
@@ -593,6 +604,8 @@ market_order_complete_probe_lock = threading.Lock()
 market_order_complete_probe_done = threading.Event()
 market_order_complete_probe_done.set()
 market_current_subtab = MARKET_SUBTAB_DETAILS
+market_safe_buy_lock = threading.Lock()
+safe_buy_attempted_for_current_card = False
 up_arrow_was_down = False
 up_arrow_press_at = 0
 up_arrow_hold_triggered = False
@@ -1647,12 +1660,31 @@ def is_game_point_visible(point_name, hwnd=None):
     return is_game_button_visible(*game.point(point_name), hwnd=hwnd)
 
 
+def note_market_action_stage_for_safe_buy(stage):
+    global safe_buy_attempted_for_current_card
+
+    if stage != STAGE_BUY and safe_buy_attempted_for_current_card:
+        safe_buy_attempted_for_current_card = False
+
+
+def is_market_safe_buy_running():
+    return market_safe_buy_lock.locked()
+
+
+def is_market_safe_buy_guard_active():
+    return is_market_safe_buy_running() or safe_buy_attempted_for_current_card
+
+
 def detect_market_action_stage():
     if is_game_point_visible("market.order_button"):
-        return STAGE_QUANTITY
-    if is_game_point_visible("market.buy_button"):
-        return STAGE_BUY
-    return None
+        stage = STAGE_QUANTITY
+    elif is_game_point_visible("market.buy_button"):
+        stage = STAGE_BUY
+    else:
+        stage = None
+
+    note_market_action_stage_for_safe_buy(stage)
+    return stage
 
 
 def open_selected_market_card():
@@ -1679,6 +1711,204 @@ def go_back_from_market_card():
 
 def buy_current_market_item():
     return game.click("market.buy_button")
+
+
+def market_safe_buy_escape_once(reason):
+    ok = go_back_from_market_card()
+    if not ok:
+        append_log_line(f"[MARKET_SAFE_BUY] one_esc_failed reason={reason}")
+    return ok
+
+
+def market_safe_buy_escape_twice(reason):
+    results = []
+    for _ in range(4):
+        results.append(go_back_from_market_card())
+        time.sleep(MARKET_SAFE_BUY_ESC_REPEAT_DELAY_SECONDS)
+
+    if not all(results):
+        append_log_line(
+            "[MARKET_SAFE_BUY] four_esc_failed "
+            f"reason={reason} results={results}"
+        )
+    return all(results)
+
+
+def parse_market_clipboard_price_cents(text):
+    if text is None:
+        return None
+
+    normalized = (
+        text.strip()
+        .replace("\u00a0", "")
+        .replace(" ", "")
+    )
+    match = re.fullmatch(r"(\d+)[,.](\d{2})", normalized)
+    if not match:
+        return None
+
+    whole = int(match.group(1))
+    cents = int(match.group(2))
+    price_cents = whole * 100 + cents
+    return price_cents if price_cents > 0 else None
+
+
+def wait_market_clipboard_price_cents(sentinel, selected_offer):
+    deadline = time.monotonic() + MARKET_CLIPBOARD_PRICE_TIMEOUT_SECONDS
+    next_copy_at = time.monotonic()
+    last_text = None
+    last_price_cents = None
+
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+        if now < next_copy_at:
+            time.sleep(min(next_copy_at - now, deadline - now))
+            continue
+
+        send_ctrl_key(VK_C, PASTE_BETWEEN_KEYS_DELAY)
+        next_copy_at = time.monotonic() + MARKET_CLIPBOARD_COPY_INTERVAL_SECONDS
+        time.sleep(MARKET_CLIPBOARD_COPY_SETTLE_SECONDS)
+
+        text = get_clipboard_text_safe()
+        if text is None or text == sentinel:
+            continue
+
+        last_text = text
+        price_cents = parse_market_clipboard_price_cents(text)
+        last_price_cents = price_cents
+        if price_cents is None:
+            continue
+        if price_cents != selected_offer.price_cents:
+            return text, price_cents
+        return text, price_cents
+
+    return last_text, last_price_cents
+
+
+def start_market_safe_buy_workflow():
+    global safe_buy_attempted_for_current_card
+
+    if safe_buy_attempted_for_current_card:
+        return False
+    if not market_safe_buy_lock.acquire(blocking=False):
+        append_log_line("[MARKET_SAFE_BUY] already_running")
+        return False
+
+    safe_buy_attempted_for_current_card = True
+    try:
+        threading.Thread(target=run_market_safe_buy_workflow, daemon=True).start()
+    except Exception as exc:
+        safe_buy_attempted_for_current_card = False
+        market_safe_buy_lock.release()
+        log_error("market_safe_buy", f"Safe-buy thread start failed: {exc}")
+        return False
+
+    return True
+
+
+def run_market_safe_buy_workflow():
+    old_clipboard = None
+    old_clipboard_saved = False
+    order_window_confirmed = False
+
+    try:
+        selected = wait_for_valid_sell_offer(
+            MARKET_SAFE_BUY_WAIT_SECONDS,
+            MARKET_SAFE_BUY_POLL_SECONDS,
+        )
+        if selected is None:
+            append_log_line("[MARKET_SAFE_BUY] no_valid_sell_offer_before_timeout")
+            market_safe_buy_escape_once("no_valid_sell_offer_before_timeout")
+            return
+
+        append_log_line(
+            "[MARKET_SAFE_BUY] selected "
+            f"row={selected.row} "
+            f"price={format_price_from_cents(selected.price_cents)} "
+            f"qty={selected.qty} "
+            f"score_price={selected.price_score:.3f} "
+            f"score_qty={selected.qty_score:.3f}"
+        )
+
+        selected_offer = selected
+        old_clipboard = get_clipboard_text_safe()
+        old_clipboard_saved = old_clipboard is not None
+        sentinel = f"__MARKET_SAFE_BUY_WAITING_{time.monotonic_ns()}__"
+        if not set_clipboard_text_safe(sentinel):
+            append_log_line("[MARKET_SAFE_BUY] clipboard_sentinel_set_failed")
+            market_safe_buy_escape_once("clipboard_sentinel_set_failed")
+            return
+
+        if not buy_current_market_item():
+            append_log_line("[MARKET_SAFE_BUY] buy_click_failed")
+            market_safe_buy_escape_once("buy_click_failed")
+            return
+
+        clipboard_text, clipboard_price_cents = wait_market_clipboard_price_cents(
+            sentinel,
+            selected_offer,
+        )
+        if clipboard_text is None:
+            append_log_line("[MARKET_SAFE_BUY] clipboard_timeout")
+            market_safe_buy_escape_twice("clipboard_timeout")
+            return
+
+        if clipboard_price_cents is None:
+            append_log_line(
+                "[MARKET_SAFE_BUY] clipboard_parse_error "
+                f"value={clipboard_text!r}"
+            )
+
+        if clipboard_price_cents != selected_offer.price_cents:
+            append_log_line(
+                "[MARKET_SAFE_BUY] price_mismatch "
+                f"selected={selected_offer.price_cents} "
+                f"clipboard={clipboard_price_cents} raw={clipboard_text!r}"
+            )
+            market_safe_buy_escape_twice("price_mismatch")
+            return
+
+        order_window_confirmed = True
+        qty_text = str(selected_offer.qty)
+        if not set_clipboard_text_safe(qty_text):
+            append_log_line(
+                "[MARKET_SAFE_BUY] qty_clipboard_verify_error "
+                f"expected={qty_text!r} actual=None"
+            )
+            market_safe_buy_escape_twice("qty_clipboard_set_failed")
+            return
+
+        clipboard_qty = get_clipboard_text_safe()
+        if clipboard_qty is None or clipboard_qty.strip() != qty_text:
+            append_log_line(
+                "[MARKET_SAFE_BUY] qty_clipboard_verify_error "
+                f"expected={qty_text!r} actual={clipboard_qty!r}"
+            )
+            market_safe_buy_escape_twice("qty_clipboard_verify_error")
+            return
+
+        if not game.click_screen("market.order_quantity_field"):
+            append_log_line("[MARKET_SAFE_BUY] quantity_field_click_failed")
+            market_safe_buy_escape_twice("quantity_field_click_failed")
+            return
+
+        send_ctrl_key(VK_A, PASTE_BETWEEN_KEYS_DELAY)
+        send_ctrl_key(VK_V, PASTE_BETWEEN_KEYS_DELAY)
+        append_log_line(f"[MARKET_SAFE_BUY] qty_pasted qty={qty_text}")
+    except Exception as exc:
+        append_log_line(f"[MARKET_SAFE_BUY] unexpected_exception {exc}")
+        log_error("market_safe_buy", f"Safe-buy workflow failed: {exc}")
+        if order_window_confirmed:
+            market_safe_buy_escape_twice("unexpected_exception")
+        else:
+            market_safe_buy_escape_once("unexpected_exception")
+    finally:
+        try:
+            if old_clipboard_saved:
+                time.sleep(PASTE_BETWEEN_KEYS_DELAY)
+                set_clipboard_text_safe(old_clipboard)
+        finally:
+            market_safe_buy_lock.release()
 
 
 def increase_market_item_quantity():
@@ -2027,6 +2257,9 @@ def handle_market_action_right():
     now = time.monotonic()
     detected_stage = detect_market_action_stage()
 
+    if is_market_safe_buy_running():
+        return False
+
     if detected_stage == STAGE_QUANTITY:
         right_arrow_last_action_stage = STAGE_QUANTITY
         set_market_action_stage(STAGE_QUANTITY, 0)
@@ -2034,10 +2267,9 @@ def handle_market_action_right():
 
     if detected_stage == STAGE_BUY:
         right_arrow_last_action_stage = STAGE_BUY
-        ok = buy_current_market_item()
-        if ok:
-            set_market_action_stage(STAGE_OPENING_BUY_DIALOG, now + GAME_BUY_TO_QUANTITY_DELAY_SECONDS)
-        return ok
+        if is_market_safe_buy_guard_active():
+            return False
+        return start_market_safe_buy_workflow()
 
     if get_market_action_stage() == STAGE_OPENING_BUY_DIALOG:
         return False
@@ -2693,6 +2925,49 @@ def set_clipboard_text_win32(text):
         return True
     finally:
         user32.CloseClipboard()
+
+
+def get_clipboard_text_win32():
+    CF_UNICODETEXT = 13
+
+    kernel32 = ctypes.windll.kernel32
+    user32 = ctypes.windll.user32
+
+    user32.GetClipboardData.restype = ctypes.c_void_p
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+
+    if not user32.OpenClipboard(0):
+        return None
+
+    try:
+        handle = user32.GetClipboardData(CF_UNICODETEXT)
+        if not handle:
+            return None
+
+        ptr = kernel32.GlobalLock(handle)
+        if not ptr:
+            return None
+
+        try:
+            return ctypes.wstring_at(ptr)
+        finally:
+            kernel32.GlobalUnlock(handle)
+    finally:
+        user32.CloseClipboard()
+
+
+def get_clipboard_text_safe():
+    text = get_clipboard_text_win32()
+    if text is not None:
+        return text
+
+    try:
+        return root.clipboard_get()
+    except Exception:
+        return None
 
 
 def set_clipboard_text_safe(text):
@@ -3905,7 +4180,7 @@ def right_shift_worker():
                 held_for = time.monotonic() - right_arrow_press_at
                 if held_for >= RIGHT_ARROW_HOLD_SECONDS and get_picker_action_hwnd():
                     stage = detect_market_action_stage()
-                    if stage == STAGE_QUANTITY:
+                    if stage == STAGE_QUANTITY and not is_market_safe_buy_guard_active():
                         if (
                             right_arrow_last_action_stage == STAGE_QUANTITY
                             and not right_arrow_hold_compensated
