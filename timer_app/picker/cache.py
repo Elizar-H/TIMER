@@ -15,6 +15,9 @@ def load_picker_cache(path=PICKER_CACHE_PATH):
     except Exception:
         return None
 
+    if not isinstance(data, dict):
+        return None
+
     items = data.get("items")
     if not isinstance(items, list):
         return None

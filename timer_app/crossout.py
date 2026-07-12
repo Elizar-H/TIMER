@@ -408,19 +408,17 @@ def clone_filters(filters):
 def read_crossoutcore_filters_cached(force=False):
     global filters_cache, filters_cache_at
 
-    now = time.monotonic()
     with filters_cache_lock:
         if (
             not force
             and filters_cache is not None
-            and now - filters_cache_at <= FILTERS_CACHE_SECONDS
+            and time.monotonic() - filters_cache_at <= FILTERS_CACHE_SECONDS
         ):
             return clone_filters(filters_cache)
 
-    filters = read_crossoutcore_filters()
-    with filters_cache_lock:
+        filters = read_crossoutcore_filters()
         filters_cache = clone_filters(filters)
-        filters_cache_at = now
+        filters_cache_at = time.monotonic()
 
     return filters
 

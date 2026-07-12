@@ -1,30 +1,40 @@
 import ctypes
-from ctypes import wintypes
 
 import threading
-import queue
-import math
 import os
-from concurrent.futures import ThreadPoolExecutor
 import re
 import time
 import tkinter as tk
 import tkinter.font as tkfont
 from timer_app.actions.market import (
     MarketActionState,
+    OrderCompleteProbeDependencies,
+    OrderCompleteProbeState,
     STAGE_BUY,
     STAGE_OPEN_CARD,
     STAGE_OPENING_BUY_DIALOG,
     STAGE_OPENING_CARD,
     STAGE_QUANTITY,
+    run_order_complete_probe,
 )
 from timer_app.actions.salvage import (
+    SalvageRuntimeState,
+    SalvageWorkflow,
+    SalvageWorkflowConfig,
+    SalvageWorkflowDependencies,
     has_cursor_moved,
+    is_context_light_pixel,
     remaining_cooldown_seconds,
+    select_context_disassemble_point,
     sleep_with_stop as salvage_sleep_with_stop,
+    wait_for_confirm_available,
     wait_while_mouse_button_held,
 )
 from timer_app.config import DEFAULT_SETTINGS, load_settings, setting
+from timer_app.clipboard import (
+    get_clipboard_text_win32 as read_clipboard_text_win32,
+    set_clipboard_text_win32 as write_clipboard_text_win32,
+)
 from timer_app.coordinates import (
     DEFAULT_COORDINATES,
     apply_legacy_coordinate_settings,
@@ -65,6 +75,7 @@ from timer_app.picker.cache import (
     load_picker_cache as load_picker_cache_file,
     save_picker_cache as save_picker_cache_file,
 )
+from timer_app.picker.data import PickerDataService, PickerRefreshState
 from timer_app.picker.items import (
     build_picker_display_rows as build_picker_display_rows_data,
     count_real_picker_items,
@@ -79,6 +90,13 @@ from timer_app.picker.items import (
     has_real_picker_items,
 )
 from timer_app.picker.paste import normalize_game_search_text
+from timer_app.timer import (
+    TimerState,
+    format_age as format_timer_age,
+    format_seconds as format_timer_seconds,
+    parse_timer as parse_timer_value,
+    run_timer_worker,
+)
 from timer_app.winapi import (
     GWL_EXSTYLE,
     MOUSEEVENTF_LEFTDOWN,
@@ -541,14 +559,30 @@ def apply_settings():
 
 apply_settings()
 
-q = queue.Queue()
+picker_data_service = PickerDataService(
+    flash_url=FLASH_URL,
+    recycling_url=RECYCLING_URL,
+    fetch_page_html=fetch_page_html,
+    fetch_market_minutes=fetch_market_minutes,
+    read_filters=read_crossoutcore_filters_cached,
+    parse_crossout_data=parse_crossout_data,
+    build_flash_items=build_flash_items,
+    build_recycling_items=build_recycling_items,
+    build_recycling_sale_prices=build_recycling_sale_prices,
+    has_real_items=has_real_picker_items,
+    count_real_items=count_real_picker_items,
+    get_profile_refresh=lambda: PICKER_PROFILE_REFRESH,
+    get_empty_retry_attempts=lambda: PICKER_EMPTY_RETRY_ATTEMPTS,
+    get_empty_retry_delay_seconds=lambda: PICKER_EMPTY_RETRY_DELAY_SECONDS,
+    log_error=log_error,
+    append_log_line=append_log_line,
+)
+
+timer_state = TimerState()
 hotkeys = HotkeyWorker(log_error)
 root = None
 canvas = None
 timer_text = None
-remaining_seconds = None
-timer_base_seconds = None
-timer_base_at = None
 notch_items = []
 alert_strip = None
 primary_monitor_alert = None
@@ -564,7 +598,7 @@ second_monitor_rect = None
 second_monitor_alert_visible = False
 second_monitor_alert_alpha = None
 alert_last_foreground_hwnd = 0
-picker_items = []
+picker_refresh = PickerRefreshState()
 picker_window = None
 picker_hwnd = None
 picker_canvas = None
@@ -583,14 +617,6 @@ picker_pending_selection_token = 0
 picker_font_cache = {}
 picker_columns_cache = {}
 picker_current_width = PICKER_WIDTH
-picker_last_refresh = 0
-picker_last_success_at = None
-picker_last_refresh_ms = None
-picker_last_item_count = 0
-picker_last_refresh_note = "кэш"
-picker_refresh_lock = threading.Lock()
-picker_fast_refresh_lock = threading.Lock()
-picker_refreshing = False
 picker_actions_enabled = False
 right_shift_order_down = False
 right_ctrl_was_down = False
@@ -599,10 +625,7 @@ right_arrow_press_at = 0
 right_arrow_hold_active = False
 right_arrow_hold_compensated = False
 right_arrow_last_action_stage = None
-market_order_complete_probe_running = False
-market_order_complete_probe_lock = threading.Lock()
-market_order_complete_probe_done = threading.Event()
-market_order_complete_probe_done.set()
+order_complete_probe_state = OrderCompleteProbeState()
 market_current_subtab = MARKET_SUBTAB_DETAILS
 market_safe_buy_lock = threading.Lock()
 safe_buy_attempted_for_current_card = False
@@ -623,19 +646,7 @@ picker_end_latched = False
 picker_end_press_at = 0
 picker_end_ignore_until = 0
 picker_end_previous_hwnd = 0
-salvage_running = False
-salvage_stop_event = threading.Event()
-salvage_expected_cursor_pos = None
-salvage_last_item_right_click_at = 0
-salvage_delete_was_down = False
-salvage_last_delete_handled_at = 0
-salvage_pair_armed = False
-salvage_cleanup_requested = False
-salvage_restart_after_stop = False
-salvage_arm_after_restart = False
-salvage_finish_current_cycle_requested = False
-salvage_action_hwnd = 0
-salvage_pair_hwnd = 0
+salvage_state = SalvageRuntimeState()
 market_action_state = MarketActionState(MARKET_ACTION_STAGE_MAX_AGE_SECONDS)
 picker_render_signature = None
 picker_refresh_needs_decor_selection = False
@@ -682,13 +693,7 @@ def acquire_single_instance():
 
 
 def parse_timer(value):
-    match = re.search(r"(\d{1,2}):(\d{2})", value)
-    if not match:
-        return "--:--", None
-
-    minutes = int(match.group(1))
-    seconds = int(match.group(2))
-    return match.group(0), minutes * 60 + seconds
+    return parse_timer_value(value)
 
 
 def is_alert_window(seconds):
@@ -696,53 +701,43 @@ def is_alert_window(seconds):
 
 
 def format_seconds(seconds):
-    safe_seconds = max(0, float(seconds))
-
-    if SHOW_MILLISECONDS_ALWAYS:
-        minutes = int(safe_seconds // 60)
-        whole_seconds = int(safe_seconds % 60)
-        centiseconds = int((safe_seconds - int(safe_seconds)) * 100)
-        return f"{minutes}:{whole_seconds:02d}.{centiseconds:02d}"
-
-    display_seconds = max(0, math.ceil(safe_seconds))
-    minutes = display_seconds // 60
-    whole_seconds = display_seconds % 60
-    return f"{minutes}:{whole_seconds:02d}"
+    return format_timer_seconds(
+        seconds,
+        show_milliseconds=SHOW_MILLISECONDS_ALWAYS,
+    )
 
 
 def format_age(seconds):
-    seconds = max(0, int(seconds))
-    if seconds < 60:
-        return f"{seconds}с"
-    minutes = seconds // 60
-    if minutes < 60:
-        return f"{minutes}м"
-    return f"{minutes // 60}ч"
+    return format_timer_age(seconds)
 
 
 def get_picker_status_text():
     if not PICKER_SHOW_STATUS:
         return ""
 
-    if picker_refreshing:
+    if picker_refresh.refreshing:
         return "обновляю..."
 
-    if picker_last_success_at is None:
-        return picker_last_refresh_note
+    if picker_refresh.last_success_at is None:
+        return picker_refresh.last_refresh_note
 
-    age = format_age(time.monotonic() - picker_last_success_at)
-    timing = f"{int(picker_last_refresh_ms)}мс" if picker_last_refresh_ms is not None else "--"
-    return f"{picker_last_item_count} · {age} · {timing}"
+    age = format_age(time.monotonic() - picker_refresh.last_success_at)
+    timing = (
+        f"{int(picker_refresh.last_refresh_ms)}мс"
+        if picker_refresh.last_refresh_ms is not None
+        else "--"
+    )
+    return f"{picker_refresh.last_item_count} · {age} · {timing}"
 
 
 def update_picker_timer_label():
     if picker_timer_label is None:
         return
 
-    if remaining_seconds is None:
+    if timer_state.remaining is None:
         text = "До обновления: --:--"
     else:
-        text = f"До обновления: {format_seconds(remaining_seconds)}"
+        text = f"До обновления: {format_seconds(timer_state.remaining)}"
 
     picker_timer_label.configure(text=text)
     if picker_status_label is not None:
@@ -750,224 +745,116 @@ def update_picker_timer_label():
 
 
 def timed_call(label, timings, func, *args):
-    started = time.perf_counter()
-    try:
-        return func(*args)
-    finally:
-        timings[label] = (time.perf_counter() - started) * 1000
+    return picker_data_service.timed_call(label, timings, func, *args)
 
 
 def fetch_picker_sources():
-    timings = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        flash_future = executor.submit(timed_call, "flash_fetch_ms", timings, fetch_page_html, FLASH_URL)
-        recycling_future = executor.submit(
-            timed_call,
-            "recycling_fetch_ms",
-            timings,
-            fetch_page_html,
-            RECYCLING_URL,
-        )
-        market_minutes_future = executor.submit(
-            timed_call,
-            "minutes_fetch_ms",
-            timings,
-            fetch_market_minutes,
-        )
-
-        filters_started = time.perf_counter()
-        filters = read_crossoutcore_filters_cached()
-        timings["filters_ms"] = (time.perf_counter() - filters_started) * 1000
-        flash_html = flash_future.result()
-
-        try:
-            recycling_html = recycling_future.result()
-        except Exception as e:
-            log_error("picker_recycling_fetch", f"Recycling page fetch failed: {e}")
-            recycling_html = None
-
-        try:
-            market_minutes = market_minutes_future.result()
-        except Exception as e:
-            log_error("picker_market_minutes_fetch", f"Market minutes fetch failed: {e}")
-            market_minutes = {}
-
-    return filters, flash_html, recycling_html, market_minutes, timings
+    return picker_data_service.fetch_picker_sources()
 
 
 def parse_market_source(source_name, html):
-    items_by_id, market_data = parse_crossout_data(html)
-    if not items_by_id or not market_data:
-        raise ValueError(f"No {source_name} data parsed")
-    return items_by_id, market_data
+    return picker_data_service.parse_market_source(source_name, html)
 
 
 def merge_market_sources(primary_items, primary_market, secondary_items, secondary_market):
-    merged_items = dict(primary_items)
-    merged_items.update(secondary_items)
-
-    merged_market = dict(primary_market)
-    merged_market.update(secondary_market)
-
-    return merged_items, merged_market
+    return picker_data_service.merge_market_sources(
+        primary_items,
+        primary_market,
+        secondary_items,
+        secondary_market,
+    )
 
 
 def log_picker_performance(timings, result):
-    if not PICKER_PROFILE_REFRESH:
-        return
-
-    parts = [
-        f"total={timings.get('total_ms', 0):.0f}ms",
-        f"flash={timings.get('flash_fetch_ms', 0):.0f}ms",
-        f"recycling={timings.get('recycling_fetch_ms', 0):.0f}ms",
-        f"minutes={timings.get('minutes_fetch_ms', 0):.0f}ms",
-        f"filters={timings.get('filters_ms', 0):.0f}ms",
-        f"build={timings.get('build_ms', 0):.0f}ms",
-        f"items={count_real_picker_items(result)}",
-    ]
-    append_log_line("picker_refresh " + " ".join(parts))
+    return picker_data_service.log_picker_performance(timings, result)
 
 
 def build_picker_items():
-    build_started = time.perf_counter()
-    filters, flash_html, recycling_html, market_minutes, timings = fetch_picker_sources()
-    parse_started = time.perf_counter()
-    items_by_id, market_data = parse_market_source("flash", flash_html)
-    timings["parse_flash_ms"] = (time.perf_counter() - parse_started) * 1000
-
-    try:
-        if recycling_html is None:
-            raise ValueError("Recycling page was not fetched")
-        parse_started = time.perf_counter()
-        recycling_items_by_id, recycling_market_data = parse_market_source(
-            "recycling",
-            recycling_html,
-        )
-        timings["parse_recycling_ms"] = (time.perf_counter() - parse_started) * 1000
-    except Exception as e:
-        log_error("picker_recycling_parse", f"Recycling page parse failed: {e}")
-        recycling_items_by_id = items_by_id
-        recycling_market_data = market_data
-
-    merged_recycling_items_by_id, merged_recycling_market_data = merge_market_sources(
-        items_by_id,
-        market_data,
-        recycling_items_by_id,
-        recycling_market_data,
-    )
-
-    items_started = time.perf_counter()
-    flash_items = build_flash_items(items_by_id, market_data, market_minutes, filters)
-    decor_items = build_recycling_items(
-        merged_recycling_items_by_id,
-        merged_recycling_market_data,
-        filters,
-    )
-
-    decor_sale_prices = build_recycling_sale_prices(
-        merged_recycling_market_data,
-        filters["recycling_rarities"],
-    )
-    timings["build_ms"] = (time.perf_counter() - items_started) * 1000
-
-    result = (
-        flash_items
-        + ([{"separator": True, "section": "Декор"}] if decor_items else [])
-        + ([{"decor_prices": True, "prices": decor_sale_prices}] if decor_items else [])
-        + decor_items
-    )
-    if not has_real_picker_items(result):
-        result = [{"separator": True, "section": "Предметы не найдены"}]
-
-    timings["total_ms"] = (time.perf_counter() - build_started) * 1000
-    log_picker_performance(timings, result)
-    return result, timings
+    return picker_data_service.build_picker_items()
 
 
 def build_picker_items_with_retries():
-    last_items = []
-    last_timings = {}
-    attempts = max(1, PICKER_EMPTY_RETRY_ATTEMPTS)
-
-    for attempt in range(attempts):
-        items, timings = build_picker_items()
-        last_items = items
-        last_timings = timings
-        if has_real_picker_items(items):
-            return items, timings, None
-
-        if attempt + 1 < attempts:
-            time.sleep(PICKER_EMPTY_RETRY_DELAY_SECONDS)
-
-    return last_items, last_timings, "empty"
+    return picker_data_service.build_picker_items_with_retries()
 
 
 def refresh_picker_items(force=False):
-    global picker_items, picker_last_refresh, picker_refreshing
-    global picker_last_success_at, picker_last_refresh_ms, picker_last_item_count
-    global picker_last_refresh_note, picker_refresh_needs_decor_selection
+    global picker_refresh_needs_decor_selection
 
     now = time.monotonic()
-    if not force and picker_items and now - picker_last_refresh < PICKER_REFRESH_SECONDS:
+    if (
+        not force
+        and picker_refresh.items
+        and now - picker_refresh.last_refresh < PICKER_REFRESH_SECONDS
+    ):
         return
 
-    if not picker_refresh_lock.acquire(blocking=False):
+    if not picker_refresh.refresh_lock.acquire(blocking=False):
         return
 
-    picker_refreshing = True
-    if root is not None:
-        root.after(0, update_picker_timer_label)
+    picker_refresh.refreshing = True
     try:
-        fresh_items, timings, warning = build_picker_items_with_retries()
-        if warning and has_real_picker_items(picker_items):
-            picker_last_refresh_note = "сайт пусто"
-            return
-
-        picker_items = fresh_items
-        picker_last_refresh = now
-        picker_last_refresh_ms = timings.get("total_ms")
-        picker_last_item_count = count_real_picker_items(fresh_items)
-        picker_refresh_needs_decor_selection = has_picker_decor_items(fresh_items)
-        if has_real_picker_items(fresh_items):
-            picker_last_success_at = time.monotonic()
-            picker_last_refresh_note = "свежие"
-            save_picker_cache()
-        else:
-            picker_last_refresh_note = "нет данных"
-    except Exception as e:
-        log_error("picker_fetch", f"Picker item fetch failed: {e}")
-        picker_last_refresh_note = "ошибка"
-        if not has_real_picker_items(picker_items):
-            picker_items = [{"separator": True, "section": "Не удалось загрузить предметы"}]
-    finally:
-        picker_refreshing = False
         if root is not None:
             root.after(0, update_picker_timer_label)
-        picker_refresh_lock.release()
+
+        fresh_items, timings, warning = build_picker_items_with_retries()
+        if warning and has_real_picker_items(picker_refresh.items):
+            picker_refresh.last_refresh_note = "сайт пусто"
+            return
+
+        picker_refresh.items = fresh_items
+        picker_refresh.last_refresh = now
+        picker_refresh.last_refresh_ms = timings.get("total_ms")
+        picker_refresh.last_item_count = count_real_picker_items(fresh_items)
+        picker_refresh_needs_decor_selection = has_picker_decor_items(fresh_items)
+        if has_real_picker_items(fresh_items):
+            picker_refresh.last_success_at = time.monotonic()
+            picker_refresh.last_refresh_note = "свежие"
+            save_picker_cache()
+        else:
+            picker_refresh.last_refresh_note = "нет данных"
+    except Exception as e:
+        log_error("picker_fetch", f"Picker item fetch failed: {e}")
+        picker_refresh.last_refresh_note = "ошибка"
+        if not has_real_picker_items(picker_refresh.items):
+            picker_refresh.items = [
+                {
+                    "separator": True,
+                    "section": "Не удалось загрузить предметы",
+                }
+            ]
+    finally:
+        picker_refresh.refreshing = False
+        try:
+            if root is not None:
+                root.after(0, update_picker_timer_label)
+        except Exception as error:
+            log_error(
+                "picker_ui_schedule",
+                f"Picker UI update schedule failed: {error}",
+            )
+        finally:
+            picker_refresh.refresh_lock.release()
 
 
 def load_picker_cache():
-    global picker_items, picker_last_refresh, picker_last_success_at, picker_last_item_count
-    global picker_last_refresh_note
-
     cached = load_picker_cache_file()
     if cached is None:
         return
 
     items, age_seconds = cached
-    picker_items = items
-    picker_last_refresh = time.monotonic() - age_seconds
-    picker_last_success_at = time.monotonic() - age_seconds
-    picker_last_item_count = count_real_picker_items(items)
-    picker_last_refresh_note = "кэш"
+    picker_refresh.items = items
+    picker_refresh.last_refresh = time.monotonic() - age_seconds
+    picker_refresh.last_success_at = time.monotonic() - age_seconds
+    picker_refresh.last_item_count = count_real_picker_items(items)
+    picker_refresh.last_refresh_note = "кэш"
 
 
 def save_picker_cache():
-    if not has_real_picker_items(picker_items):
+    if not has_real_picker_items(picker_refresh.items):
         return
 
     try:
-        save_picker_cache_file(picker_items)
+        save_picker_cache_file(picker_refresh.items)
     except Exception as e:
         log_error("picker_cache", f"Picker cache save failed: {e}")
 
@@ -999,7 +886,7 @@ def picker_refresh_worker():
 
 
 def picker_fast_refresh_worker():
-    if not picker_fast_refresh_lock.acquire(blocking=False):
+    if not picker_refresh.fast_refresh_lock.acquire(blocking=False):
         return
 
     try:
@@ -1008,7 +895,7 @@ def picker_fast_refresh_worker():
             if attempt + 1 < PICKER_FAST_REFRESH_ATTEMPTS:
                 time.sleep(PICKER_FAST_REFRESH_DELAY_SECONDS)
     finally:
-        picker_fast_refresh_lock.release()
+        picker_refresh.fast_refresh_lock.release()
 
 
 def trigger_picker_fast_refresh():
@@ -1016,65 +903,44 @@ def trigger_picker_fast_refresh():
 
 
 def timer_worker():
-    target_delta_ms = None
-    fetched_at = time.monotonic()
-
-    while True:
-        if TEST_MODE:
-            seconds_left = TEST_ALERT_SECONDS
-            q.put((format_seconds(seconds_left), seconds_left))
-            time.sleep(0.05)
-            continue
-
-        if target_delta_ms is None:
-            try:
-                target_delta_ms = fetch_target_update()
-                if target_delta_ms is None:
-                    raise ValueError("Timer timestamp not found")
-                fetched_at = time.monotonic()
-            except Exception as e:
-                log_error("fetch", f"Timer fetch failed: {e}")
-                q.put("--:--")
-                time.sleep(3)
-                continue
-
-        elapsed_ms = (time.monotonic() - fetched_at) * 1000
-        seconds_left = (target_delta_ms - elapsed_ms) / 1000
-        q.put((format_seconds(seconds_left), seconds_left))
-
-        if seconds_left <= ALERT_END_SECONDS:
-            trigger_picker_fast_refresh()
-            target_delta_ms = None
-            time.sleep(1)
-        else:
-            time.sleep(0.05 if is_alert_window(seconds_left) else 0.2)
+    return run_timer_worker(
+        timer_state,
+        fetch_target_update=fetch_target_update,
+        trigger_picker_fast_refresh=trigger_picker_fast_refresh,
+        log_error=log_error,
+        get_test_mode=lambda: TEST_MODE,
+        get_test_alert_seconds=lambda: TEST_ALERT_SECONDS,
+        get_alert_start_seconds=lambda: ALERT_START_SECONDS,
+        get_alert_end_seconds=lambda: ALERT_END_SECONDS,
+        get_show_milliseconds=lambda: SHOW_MILLISECONDS_ALWAYS,
+    )
 
 
 def update_label():
-    global remaining_seconds, timer_base_at, timer_base_seconds
-
-    while not q.empty():
-        value = q.get()
+    while not timer_state.queue.empty():
+        value = timer_state.queue.get()
         if isinstance(value, tuple):
             _, seconds_left = value
-            timer_base_seconds = float(seconds_left)
-            timer_base_at = time.monotonic()
+            timer_state.base_seconds = float(seconds_left)
+            timer_state.base_at = time.monotonic()
         else:
             display_value, seconds_left = parse_timer(value)
-            timer_base_seconds = seconds_left
-            timer_base_at = None
+            timer_state.base_seconds = seconds_left
+            timer_state.base_at = None
             if SHOW_NOTCH_OVERLAY and canvas is not None and timer_text is not None:
                 canvas.itemconfig(timer_text, text=display_value)
 
-    if timer_base_seconds is not None:
-        if timer_base_at is None:
-            smooth_seconds = timer_base_seconds
+    if timer_state.base_seconds is not None:
+        if timer_state.base_at is None:
+            smooth_seconds = timer_state.base_seconds
         elif TEST_MODE:
-            smooth_seconds = timer_base_seconds
+            smooth_seconds = timer_state.base_seconds
         else:
-            smooth_seconds = timer_base_seconds - (time.monotonic() - timer_base_at)
+            smooth_seconds = timer_state.base_seconds - (
+                time.monotonic() - timer_state.base_at
+            )
 
-        remaining_seconds = smooth_seconds
+        timer_state.remaining = smooth_seconds
         if SHOW_NOTCH_OVERLAY and canvas is not None and timer_text is not None:
             canvas.itemconfig(timer_text, text=format_seconds(smooth_seconds))
 
@@ -1160,7 +1026,7 @@ def update_colors():
     foreground_hwnd = get_effective_foreground_for_alerts()
     game_foreground = is_game_window(foreground_hwnd)
 
-    if not is_alert_window(remaining_seconds):
+    if not is_alert_window(timer_state.remaining):
         set_notch_visible(False)
         set_alert_visible(False)
         set_primary_monitor_alert(False)
@@ -1465,24 +1331,21 @@ def send_game_to_background():
 
 
 def note_salvage_cursor_pos():
-    global salvage_expected_cursor_pos
-
-    salvage_expected_cursor_pos = get_cursor_pos()
+    salvage_state.expected_cursor_pos = get_cursor_pos()
 
 
 def mark_salvage_mouse_cancel(stop_event):
-    global salvage_cleanup_requested, salvage_finish_current_cycle_requested
-
     reset_salvage_del_pair("mouse moved")
-    salvage_cleanup_requested = False
-    salvage_finish_current_cycle_requested = False
+    with salvage_state.lifecycle_lock:
+        salvage_state.cleanup_requested = False
+        salvage_state.finish_current_cycle_requested = False
     append_log_line("salvage stopped: mouse moved")
     if stop_event is not None:
         stop_event.set()
 
 
 def salvage_cursor_moved_by_user():
-    if salvage_expected_cursor_pos is None:
+    if salvage_state.expected_cursor_pos is None:
         note_salvage_cursor_pos()
         return False
 
@@ -1491,7 +1354,7 @@ def salvage_cursor_moved_by_user():
         return False
 
     return has_cursor_moved(
-        salvage_expected_cursor_pos,
+        salvage_state.expected_cursor_pos,
         current_pos,
         SALVAGE_MOUSE_CANCEL_THRESHOLD_PIXELS,
     )
@@ -1615,12 +1478,10 @@ def is_white_pixel(rgb):
 
 
 def is_salvage_context_light_pixel(rgb):
-    if rgb is None:
-        return False
-
-    return (
-        min(rgb) >= SALVAGE_CONTEXT_LIGHT_MIN_CHANNEL
-        and max(rgb) - min(rgb) <= SALVAGE_CONTEXT_LIGHT_MAX_CHANNEL_SPREAD
+    return is_context_light_pixel(
+        rgb,
+        SALVAGE_CONTEXT_LIGHT_MIN_CHANNEL,
+        SALVAGE_CONTEXT_LIGHT_MAX_CHANNEL_SPREAD,
     )
 
 
@@ -2056,68 +1917,48 @@ def ensure_game_foreground_for_escape(preferred_hwnd=0):
     return 0
 
 
+def release_held_order_button_for_complete_probe():
+    global right_shift_order_down
+
+    send_mouse_button(MOUSEEVENTF_LEFTUP)
+    right_shift_order_down = False
+
+
 def wait_market_order_complete_and_escape():
-    global market_order_complete_probe_running, right_shift_order_down
-
     try:
-        deadline = time.monotonic() + MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS
-        last_rgb = None
-        target_hwnd = find_known_game_hwnd()
-        focus_wait_logged = False
-        while time.monotonic() < deadline:
-            # The market order is submitted on mouse-up, so do not time out while holding.
-            if right_shift_order_down:
-                deadline = time.monotonic() + MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS
-
-            target_hwnd = ensure_game_foreground_for_escape(target_hwnd)
-            if not target_hwnd:
-                if not focus_wait_logged:
-                    append_log_line("market order complete probe: waiting for game focus")
-                    focus_wait_logged = True
-                time.sleep(MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS)
-                continue
-
-            hit_point, rgb = read_market_order_complete_probe()
-            last_rgb = rgb
-            if hit_point is not None:
-                append_log_line(f"market order complete: esc at {hit_point} rgb={rgb}")
-                if right_shift_order_down:
-                    send_mouse_button(MOUSEEVENTF_LEFTUP)
-                    right_shift_order_down = False
-                reset_market_action_stage()
-                target_hwnd = ensure_game_foreground_for_escape(target_hwnd)
-                if not target_hwnd:
-                    append_log_line("market order complete: esc skipped, game focus unavailable")
-                    return
-                tap_key_scancode(VK_ESCAPE, delay=0.010)
-                time.sleep(MARKET_ORDER_COMPLETE_ESC_REPEAT_DELAY_SECONDS)
-                tap_key_scancode(VK_ESCAPE, delay=0.010)
-                return
-
-            time.sleep(MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS)
-
-        append_log_line(f"market order complete probe timeout: last_rgb={last_rgb}")
+        dependencies = OrderCompleteProbeDependencies(
+            monotonic=lambda: time.monotonic(),
+            sleep=lambda seconds: time.sleep(seconds),
+            get_wait_seconds=lambda: MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS,
+            get_poll_seconds=lambda: MARKET_ORDER_COMPLETE_PROBE_POLL_SECONDS,
+            get_escape_repeat_delay_seconds=lambda: (
+                MARKET_ORDER_COMPLETE_ESC_REPEAT_DELAY_SECONDS
+            ),
+            find_initial_hwnd=lambda: find_known_game_hwnd(),
+            ensure_focus=lambda hwnd: ensure_game_foreground_for_escape(hwnd),
+            read_probe=lambda: read_market_order_complete_probe(),
+            is_order_button_held=lambda: right_shift_order_down,
+            release_held_order_button=lambda: (
+                release_held_order_button_for_complete_probe()
+            ),
+            reset_action_stage=lambda: reset_market_action_stage(),
+            tap_escape=lambda: tap_key_scancode(VK_ESCAPE, delay=0.010),
+            append_log_line=lambda message: append_log_line(message),
+        )
+        run_order_complete_probe(dependencies)
     finally:
-        with market_order_complete_probe_lock:
-            market_order_complete_probe_running = False
-            market_order_complete_probe_done.set()
+        order_complete_probe_state.finish()
 
 
 def start_market_order_complete_escape_probe():
-    global market_order_complete_probe_running
-
-    with market_order_complete_probe_lock:
-        if market_order_complete_probe_running:
-            return
-        market_order_complete_probe_running = True
-        market_order_complete_probe_done.clear()
+    if not order_complete_probe_state.try_begin():
+        return
 
     threading.Thread(target=wait_market_order_complete_and_escape, daemon=True).start()
 
 
 def is_market_order_complete_probe_running():
-    with market_order_complete_probe_lock:
-        return market_order_complete_probe_running
+    return order_complete_probe_state.is_running()
 
 
 def wait_market_order_complete_probe_if_running():
@@ -2126,7 +1967,7 @@ def wait_market_order_complete_probe_if_running():
 
     append_log_line("market navigation: waiting for order complete probe")
     wait_seconds = MARKET_ORDER_COMPLETE_PROBE_WAIT_SECONDS + 0.25
-    return market_order_complete_probe_done.wait(wait_seconds)
+    return order_complete_probe_state.wait(wait_seconds)
 
 
 def cancel_pending_picker_selection(redraw=False):
@@ -2409,7 +2250,7 @@ def sleep_with_stop(seconds, stop_event, mouse_guard=False):
 
 
 def salvage_click(point_name, stop_event, right=False):
-    target_hwnd = salvage_action_hwnd or get_picker_action_hwnd()
+    target_hwnd = salvage_state.action_hwnd or get_picker_action_hwnd()
     if stop_event.is_set() or not target_hwnd:
         return False
     ok = (
@@ -2475,49 +2316,30 @@ def first_salvage_context_light_sample(point_name):
 
 
 def select_salvage_context_disassemble_point(stop_event):
-    started_at = time.monotonic()
-    deadline = started_at + max(0.0, SALVAGE_CONTEXT_PROBE_WAIT_SECONDS)
-    probe_log_parts = []
-
-    while not stop_event.is_set() and is_live_game_window(salvage_action_hwnd):
-        top_probe, top_click = SALVAGE_CONTEXT_DISASSEMBLE_CHOICES[0]
-        bottom_probe, bottom_click = SALVAGE_CONTEXT_DISASSEMBLE_CHOICES[1]
-
-        top_hit, top_rgb = first_salvage_context_light_sample(top_probe)
-        bottom_hit, bottom_rgb = first_salvage_context_light_sample(bottom_probe)
-        probe_log_parts = [
-            f"{top_probe}={top_rgb}",
-            f"{bottom_probe}={bottom_rgb}",
-        ]
-
-        if top_hit is not None:
-            return top_click
-        if bottom_hit is not None:
-            return bottom_click
-
-        remaining_seconds = deadline - time.monotonic()
-        if remaining_seconds <= 0:
-            break
-
-        wait_seconds = min(
-            max(0.001, SALVAGE_CONTEXT_PROBE_POLL_SECONDS),
-            remaining_seconds,
-        )
-        if not sleep_with_stop(wait_seconds, stop_event, mouse_guard=True):
-            return None
-
-    elapsed_ms = round((time.monotonic() - started_at) * 1000)
-    append_log_line(
-        "salvage context probe "
-        + " ".join(probe_log_parts)
-        + f" finish_after_fallback_step elapsed_ms={elapsed_ms}"
+    return select_context_disassemble_point(
+        stop_event,
+        fallback_point="salvage.context_disassemble",
+        monotonic=lambda: time.monotonic(),
+        get_choices=lambda: SALVAGE_CONTEXT_DISASSEMBLE_CHOICES,
+        get_wait_seconds=lambda: SALVAGE_CONTEXT_PROBE_WAIT_SECONDS,
+        get_poll_seconds=lambda: SALVAGE_CONTEXT_PROBE_POLL_SECONDS,
+        get_action_hwnd=lambda: salvage_state.action_hwnd,
+        is_live_window=lambda hwnd: is_live_game_window(hwnd),
+        first_light_sample=lambda point_name: (
+            first_salvage_context_light_sample(point_name)
+        ),
+        sleep_with_stop=lambda seconds, event, mouse_guard=False: (
+            sleep_with_stop(seconds, event, mouse_guard=mouse_guard)
+        ),
+        append_log_line=lambda message: append_log_line(message),
+        request_finish_current_cycle=lambda *, cleanup: (
+            request_salvage_finish_current_cycle(cleanup=cleanup)
+        ),
     )
-    request_salvage_finish_current_cycle(cleanup=True)
-    return "salvage.context_disassemble"
 
 
 def salvage_click_screen(point_name, stop_event):
-    target_hwnd = salvage_action_hwnd or get_picker_action_hwnd()
+    target_hwnd = salvage_state.action_hwnd or get_picker_action_hwnd()
     if stop_event.is_set() or not target_hwnd:
         return False
 
@@ -2529,7 +2351,7 @@ def salvage_click_screen(point_name, stop_event):
 
 
 def salvage_click_context_disassemble(stop_event):
-    target_hwnd = salvage_action_hwnd or get_picker_action_hwnd()
+    target_hwnd = salvage_state.action_hwnd or get_picker_action_hwnd()
     if stop_event.is_set() or not target_hwnd:
         return False
 
@@ -2541,9 +2363,7 @@ def salvage_click_context_disassemble(stop_event):
 
 
 def salvage_right_click_item(point_name, stop_event):
-    global salvage_last_item_right_click_at
-
-    target_hwnd = salvage_action_hwnd or get_picker_action_hwnd()
+    target_hwnd = salvage_state.action_hwnd or get_picker_action_hwnd()
     if stop_event.is_set() or not target_hwnd:
         return False
 
@@ -2553,7 +2373,7 @@ def salvage_right_click_item(point_name, stop_event):
     if not sleep_with_stop(SALVAGE_ITEM_HOVER_DELAY_SECONDS, stop_event, mouse_guard=True):
         return False
     wait_time = remaining_cooldown_seconds(
-        salvage_last_item_right_click_at,
+        salvage_state.last_item_right_click_at,
         SALVAGE_ITEM_RIGHT_CLICK_MIN_INTERVAL_SECONDS,
     )
     if wait_time:
@@ -2561,34 +2381,31 @@ def salvage_right_click_item(point_name, stop_event):
             return False
     if not send_mouse_right_click(MOUSE_CLICK_DELAY):
         return False
-    salvage_last_item_right_click_at = time.monotonic()
+    salvage_state.last_item_right_click_at = time.monotonic()
     note_salvage_cursor_pos()
     return sleep_with_stop(SALVAGE_POST_RIGHT_CLICK_DELAY_SECONDS, stop_event, mouse_guard=True)
 
 
 def salvage_confirm_available():
-    return is_game_point_visible("salvage.confirm_button", hwnd=salvage_action_hwnd)
+    return is_game_point_visible(
+        "salvage.confirm_button",
+        hwnd=salvage_state.action_hwnd,
+    )
 
 
 def wait_for_salvage_confirm_available(stop_event):
-    deadline = time.monotonic() + max(0.0, SALVAGE_CONFIRM_WAIT_SECONDS)
-
-    while not stop_event.is_set() and is_live_game_window(salvage_action_hwnd):
-        if salvage_confirm_available():
-            return True
-
-        remaining_seconds = deadline - time.monotonic()
-        if remaining_seconds <= 0:
-            return False
-
-        if not sleep_with_stop(
-            min(SALVAGE_CONFIRM_POLL_SECONDS, remaining_seconds),
-            stop_event,
-            mouse_guard=True,
-        ):
-            return False
-
-    return False
+    return wait_for_confirm_available(
+        stop_event,
+        monotonic=lambda: time.monotonic(),
+        get_wait_seconds=lambda: SALVAGE_CONFIRM_WAIT_SECONDS,
+        get_poll_seconds=lambda: SALVAGE_CONFIRM_POLL_SECONDS,
+        get_action_hwnd=lambda: salvage_state.action_hwnd,
+        is_live_window=lambda hwnd: is_live_game_window(hwnd),
+        confirm_available=lambda: salvage_confirm_available(),
+        sleep_with_stop=lambda seconds, event, mouse_guard=False: (
+            sleep_with_stop(seconds, event, mouse_guard=mouse_guard)
+        ),
+    )
 
 
 def restore_salvage_sort_type(hwnd=None):
@@ -2618,20 +2435,20 @@ def restore_salvage_sort_type(hwnd=None):
 
 
 def arm_salvage_del_pair(hwnd=None):
-    global salvage_pair_armed, salvage_pair_hwnd
-
-    salvage_pair_armed = True
-    if hwnd:
-        salvage_pair_hwnd = hwnd
+    with salvage_state.lifecycle_lock:
+        salvage_state.pair_armed = True
+        if hwnd:
+            salvage_state.pair_hwnd = hwnd
 
 
 def reset_salvage_del_pair(reason=None):
-    global salvage_pair_armed, salvage_pair_hwnd
+    with salvage_state.lifecycle_lock:
+        was_armed = salvage_state.pair_armed
+        salvage_state.pair_armed = False
+        salvage_state.pair_hwnd = 0
 
-    if salvage_pair_armed and reason:
+    if was_armed and reason:
         append_log_line(f"salvage Del pair reset: {reason}")
-    salvage_pair_armed = False
-    salvage_pair_hwnd = 0
 
 
 def is_any_non_delete_key_down():
@@ -2645,162 +2462,146 @@ def is_any_non_delete_key_down():
 
 
 def run_salvage_loop(stop_event):
-    global salvage_running, salvage_expected_cursor_pos, salvage_last_item_right_click_at
-    global salvage_action_hwnd
-    global salvage_cleanup_requested, salvage_restart_after_stop, salvage_arm_after_restart
-    global salvage_finish_current_cycle_requested
-
-    try:
-        hwnd = salvage_action_hwnd or get_salvage_action_hwnd()
-        if not hwnd:
-            append_log_line("salvage start failed: game window not found")
-            return
-
-        salvage_action_hwnd = hwnd
-        salvage_expected_cursor_pos = None
-        salvage_last_item_right_click_at = 0
-        root.after(0, hide_picker)
-        sleep_with_stop(0.06, stop_event)
-
-        if not salvage_click("salvage.storage_tab", stop_event):
-            return
-        if not salvage_click("salvage.details_tab", stop_event):
-            return
-        if not salvage_click("salvage.pre_decor_category", stop_event):
-            return
-        if not salvage_click("salvage.decor_category", stop_event):
-            return
-        if not salvage_click("salvage.sort_dropdown", stop_event):
-            return
-        if not salvage_click("salvage.sort_new_option", stop_event):
-            return
-
-        if salvage_finish_current_cycle_requested:
-            return
-
-        while (
-            not stop_event.is_set()
-            and not salvage_finish_current_cycle_requested
-            and is_live_game_window(salvage_action_hwnd)
-        ):
-            if not salvage_right_click_item("salvage.first_item", stop_event):
-                break
-            if not salvage_click_context_disassemble(stop_event):
-                break
-            if (
-                SALVAGE_POST_MENU_CLICK_DELAY_SECONDS > 0
-                and not sleep_with_stop(
-                    SALVAGE_POST_MENU_CLICK_DELAY_SECONDS,
-                    stop_event,
-                    mouse_guard=True,
-                )
-            ):
-                break
-
-            if not wait_for_salvage_confirm_available(stop_event):
-                append_log_line("salvage stopped: confirm button not found")
-                break
-
-            if not salvage_click("salvage.all_button", stop_event):
-                break
-            if not sleep_with_stop(SALVAGE_POST_ALL_CLICK_DELAY_SECONDS, stop_event, mouse_guard=True):
-                break
-            if not game.hold(
-                "salvage.confirm_button",
-                SALVAGE_CONFIRM_HOLD_SECONDS,
-                stop_event=stop_event,
-                mouse_guard=True,
-                before_hold=note_salvage_cursor_pos,
-            ):
-                break
-            if not sleep_with_stop(SALVAGE_AFTER_CONFIRM_SECONDS, stop_event, mouse_guard=True):
-                break
-            if salvage_finish_current_cycle_requested:
-                break
-    except Exception as e:
-        log_error("salvage", f"Salvage loop failed: {e}")
-    finally:
-        was_cancelled = stop_event.is_set()
-        should_cleanup = salvage_cleanup_requested
-        should_restart = was_cancelled and salvage_restart_after_stop
-        should_arm_after_restart = salvage_arm_after_restart
-        send_mouse_button(MOUSEEVENTF_LEFTUP)
-        if should_cleanup:
-            restore_salvage_sort_type(hwnd=salvage_action_hwnd)
-        salvage_running = False
-        salvage_action_hwnd = 0
-        salvage_cleanup_requested = False
-        salvage_restart_after_stop = False
-        salvage_arm_after_restart = False
-        salvage_finish_current_cycle_requested = False
-        stop_event.clear()
-        if should_restart:
-            root.after(
-                0,
-                lambda: start_salvage_loop(arm_pair=should_arm_after_restart),
-            )
+    config = SalvageWorkflowConfig(
+        startup_delay_seconds=0.06,
+        post_menu_click_delay_seconds=SALVAGE_POST_MENU_CLICK_DELAY_SECONDS,
+        post_all_click_delay_seconds=SALVAGE_POST_ALL_CLICK_DELAY_SECONDS,
+        confirm_hold_seconds=SALVAGE_CONFIRM_HOLD_SECONDS,
+        after_confirm_seconds=SALVAGE_AFTER_CONFIRM_SECONDS,
+    )
+    dependencies = SalvageWorkflowDependencies(
+        get_action_hwnd=lambda: get_salvage_action_hwnd(),
+        schedule_ui=lambda delay_ms, callback: root.after(delay_ms, callback),
+        hide_picker=hide_picker,
+        sleep_with_stop=lambda seconds, event, mouse_guard=False: sleep_with_stop(
+            seconds,
+            event,
+            mouse_guard=mouse_guard,
+        ),
+        click=lambda point_name, event: salvage_click(point_name, event),
+        right_click_item=lambda point_name, event: salvage_right_click_item(
+            point_name,
+            event,
+        ),
+        click_context_disassemble=lambda event: (
+            salvage_click_context_disassemble(event)
+        ),
+        wait_for_confirm=lambda event: wait_for_salvage_confirm_available(event),
+        hold=lambda point_name, seconds, **kwargs: game.hold(
+            point_name,
+            seconds,
+            **kwargs,
+        ),
+        note_cursor_position=note_salvage_cursor_pos,
+        is_live_game_window=lambda hwnd: is_live_game_window(hwnd),
+        release_left_mouse_button=lambda: send_mouse_button(
+            MOUSEEVENTF_LEFTUP
+        ),
+        restore_sort_type=lambda *, hwnd: restore_salvage_sort_type(hwnd=hwnd),
+        start_workflow=lambda *, arm_pair: start_salvage_loop(
+            arm_pair=arm_pair
+        ),
+        append_log_line=lambda message: append_log_line(message),
+        log_error=lambda scope, message: log_error(scope, message),
+    )
+    return SalvageWorkflow(
+        salvage_state,
+        config,
+        dependencies,
+    ).run(stop_event)
 
 
 def request_salvage_stop(cleanup=False, restart=False, arm_after_restart=False):
-    global salvage_cleanup_requested, salvage_restart_after_stop, salvage_arm_after_restart
-    global salvage_finish_current_cycle_requested
+    with salvage_state.lifecycle_lock:
+        if not salvage_state.running:
+            return False
 
-    if not salvage_running:
-        return False
+        salvage_state.cleanup_requested = bool(cleanup)
+        salvage_state.restart_after_stop = bool(restart)
+        salvage_state.arm_after_restart = bool(arm_after_restart)
+        salvage_state.finish_current_cycle_requested = False
+        salvage_state.stop_event.set()
 
-    salvage_cleanup_requested = bool(cleanup)
-    salvage_restart_after_stop = bool(restart)
-    salvage_arm_after_restart = bool(arm_after_restart)
-    salvage_finish_current_cycle_requested = False
-    salvage_stop_event.set()
     send_mouse_button(MOUSEEVENTF_LEFTUP)
     return True
 
 
 def request_salvage_finish_current_cycle(cleanup=False):
-    global salvage_cleanup_requested, salvage_finish_current_cycle_requested
-    global salvage_restart_after_stop, salvage_arm_after_restart
+    with salvage_state.lifecycle_lock:
+        if not salvage_state.running:
+            return False
 
-    if not salvage_running:
-        return False
+        salvage_state.cleanup_requested = bool(cleanup)
+        salvage_state.finish_current_cycle_requested = True
+        salvage_state.restart_after_stop = False
+        salvage_state.arm_after_restart = False
 
-    salvage_cleanup_requested = bool(cleanup)
-    salvage_finish_current_cycle_requested = True
-    salvage_restart_after_stop = False
-    salvage_arm_after_restart = False
     append_log_line("salvage will stop after current cycle")
     return True
 
 
+def is_salvage_running():
+    with salvage_state.lifecycle_lock:
+        return salvage_state.running
+
+
 def start_salvage_loop(arm_pair=False):
-    global salvage_running, salvage_delete_was_down
-    global salvage_action_hwnd
-    global salvage_cleanup_requested, salvage_restart_after_stop, salvage_arm_after_restart
-    global salvage_finish_current_cycle_requested
+    start_error = None
+    with salvage_state.lifecycle_lock:
+        if salvage_state.running or salvage_state.finalizing:
+            return False
 
-    if salvage_running:
-        return False
-    target_hwnd = get_salvage_action_hwnd()
-    if not target_hwnd:
-        append_log_line("salvage start skipped: picker/game window not available")
+        previous_pair_armed = salvage_state.pair_armed
+        previous_pair_hwnd = salvage_state.pair_hwnd
+        target_hwnd = get_salvage_action_hwnd()
+        if not target_hwnd:
+            append_log_line(
+                "salvage start skipped: picker/game window not available"
+            )
+            return False
+
+        salvage_state.action_hwnd = target_hwnd
+        salvage_state.delete_was_down = is_virtual_key_down(VK_DELETE)
+        salvage_state.cleanup_requested = False
+        salvage_state.restart_after_stop = False
+        salvage_state.arm_after_restart = False
+        salvage_state.finish_current_cycle_requested = False
+        salvage_state.stop_event.clear()
+        salvage_state.running = True
+        if arm_pair:
+            arm_salvage_del_pair()
+
+        try:
+            worker = threading.Thread(
+                target=run_salvage_loop,
+                args=(salvage_state.stop_event,),
+                daemon=True,
+            )
+            worker.start()
+        except Exception as error:
+            start_error = error
+            salvage_state.running = False
+            salvage_state.action_hwnd = 0
+            salvage_state.cleanup_requested = False
+            salvage_state.restart_after_stop = False
+            salvage_state.arm_after_restart = False
+            salvage_state.finish_current_cycle_requested = False
+            salvage_state.stop_event.clear()
+            salvage_state.pair_armed = previous_pair_armed
+            salvage_state.pair_hwnd = previous_pair_hwnd
+
+    if start_error is not None:
+        log_error("salvage", f"Salvage thread start failed: {start_error}")
         return False
 
-    salvage_action_hwnd = target_hwnd
-    salvage_delete_was_down = is_virtual_key_down(VK_DELETE)
-    salvage_cleanup_requested = False
-    salvage_restart_after_stop = False
-    salvage_arm_after_restart = False
-    salvage_finish_current_cycle_requested = False
-    salvage_stop_event.clear()
-    salvage_running = True
-    if arm_pair:
-        arm_salvage_del_pair()
-    threading.Thread(target=run_salvage_loop, args=(salvage_stop_event,), daemon=True).start()
     return True
 
 
 def run_salvage_second_script():
-    target_hwnd = salvage_action_hwnd or salvage_pair_hwnd or get_picker_action_hwnd() or find_known_game_hwnd()
+    with salvage_state.lifecycle_lock:
+        target_hwnd = salvage_state.action_hwnd or salvage_state.pair_hwnd
+
+    target_hwnd = target_hwnd or get_picker_action_hwnd() or find_known_game_hwnd()
     reset_salvage_del_pair()
     if request_salvage_finish_current_cycle(cleanup=True):
         return True
@@ -2809,24 +2610,26 @@ def run_salvage_second_script():
 
 
 def handle_salvage_del_press(ignore_latch=False):
-    global salvage_delete_was_down, salvage_last_delete_handled_at
-
     delete_down = is_virtual_key_down(VK_DELETE)
     now = time.monotonic()
-    if delete_down and salvage_delete_was_down and not ignore_latch:
-        return
-    if now - salvage_last_delete_handled_at < 0.20:
-        return
+    with salvage_state.lifecycle_lock:
+        if delete_down and salvage_state.delete_was_down and not ignore_latch:
+            return
+        if now - salvage_state.last_delete_handled_at < 0.20:
+            return
 
-    salvage_delete_was_down = delete_down
-    salvage_last_delete_handled_at = now
+        salvage_state.delete_was_down = delete_down
+        salvage_state.last_delete_handled_at = now
 
-    if not salvage_running and not is_picker_open():
+    if not is_salvage_running() and not is_picker_open():
         append_log_line("salvage Del ignored: picker is closed")
         hotkeys.pass_delete_once()
         return
 
-    if not salvage_running and not wait_market_order_complete_probe_if_running():
+    if (
+        not is_salvage_running()
+        and not wait_market_order_complete_probe_if_running()
+    ):
         append_log_line("salvage Del skipped: order complete probe wait failed")
         return
 
@@ -2834,7 +2637,7 @@ def handle_salvage_del_press(ignore_latch=False):
         return
 
     append_log_line("salvage Del: script")
-    if salvage_running:
+    if is_salvage_running():
         request_salvage_stop(restart=True, arm_after_restart=False)
         return
 
@@ -2875,88 +2678,11 @@ def _log_direct(message):
 
 
 def set_clipboard_text_win32(text):
-    """Кладёт Unicode-текст в буфер обмена напрямую через WinAPI."""
-    CF_UNICODETEXT = 13
-    GMEM_MOVEABLE = 0x0002
-
-    kernel32 = ctypes.windll.kernel32
-    user32 = ctypes.windll.user32
-
-    kernel32.GlobalAlloc.restype = ctypes.c_void_p
-    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
-    kernel32.GlobalLock.restype = ctypes.c_void_p
-    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalFree.restype = ctypes.c_void_p
-    kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
-    user32.SetClipboardData.restype = ctypes.c_void_p
-    user32.SetClipboardData.argtypes = [wintypes.UINT, ctypes.c_void_p]
-
-    text_bytes = text.encode("utf-16-le") + b"\x00\x00"
-
-    if not user32.OpenClipboard(0):
-        _log_direct(f"OpenClipboard failed, err={kernel32.GetLastError()}")
-        return False
-
-    h_mem = None
-    try:
-        user32.EmptyClipboard()
-        h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(text_bytes))
-        if not h_mem:
-            _log_direct(f"GlobalAlloc failed, err={kernel32.GetLastError()}")
-            return False
-
-        ptr = kernel32.GlobalLock(h_mem)
-        if not ptr:
-            _log_direct(f"GlobalLock failed, err={kernel32.GetLastError()}")
-            kernel32.GlobalFree(h_mem)
-            return False
-
-        ctypes.memmove(ptr, text_bytes, len(text_bytes))
-        kernel32.GlobalUnlock(h_mem)
-
-        if not user32.SetClipboardData(CF_UNICODETEXT, h_mem):
-            _log_direct(f"SetClipboardData failed, err={kernel32.GetLastError()}")
-            kernel32.GlobalFree(h_mem)
-            return False
-
-        # После успешного SetClipboardData память принадлежит Windows, освобождать её нельзя.
-        h_mem = None
-        return True
-    finally:
-        user32.CloseClipboard()
+    return write_clipboard_text_win32(text, _log_direct)
 
 
 def get_clipboard_text_win32():
-    CF_UNICODETEXT = 13
-
-    kernel32 = ctypes.windll.kernel32
-    user32 = ctypes.windll.user32
-
-    user32.GetClipboardData.restype = ctypes.c_void_p
-    user32.GetClipboardData.argtypes = [wintypes.UINT]
-    kernel32.GlobalLock.restype = ctypes.c_void_p
-    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-
-    if not user32.OpenClipboard(0):
-        return None
-
-    try:
-        handle = user32.GetClipboardData(CF_UNICODETEXT)
-        if not handle:
-            return None
-
-        ptr = kernel32.GlobalLock(handle)
-        if not ptr:
-            return None
-
-        try:
-            return ctypes.wstring_at(ptr)
-        finally:
-            kernel32.GlobalUnlock(handle)
-    finally:
-        user32.CloseClipboard()
+    return read_clipboard_text_win32()
 
 
 def get_clipboard_text_safe():
@@ -3449,12 +3175,16 @@ def clear_picker_rows():
 
 
 def get_picker_render_signature():
-    return (id(picker_items), len(picker_items), picker_last_refresh)
+    return (
+        id(picker_refresh.items),
+        len(picker_refresh.items),
+        picker_refresh.last_refresh,
+    )
 
 
 def build_picker_display_rows():
     return build_picker_display_rows_data(
-        picker_items,
+        picker_refresh.items,
         PICKER_HEADER_HEIGHT,
         PICKER_ROW_HEIGHT,
     )
@@ -3777,7 +3507,7 @@ def populate_picker(force=False, sync_selected_name=False):
 
     selected_item_name = get_selected_picker_item_name()
     clear_picker_rows()
-    if not picker_items:
+    if not picker_refresh.items:
         show_picker_message("Загрузка...")
     else:
         draw_picker_canvas_rows(
@@ -4112,7 +3842,7 @@ def show_picker(toggle=True):
         return
     if not open_game_market_details():
         return
-    if picker_items:
+    if picker_refresh.items:
         populate_picker(sync_selected_name=picker_refresh_needs_decor_selection)
     else:
         show_picker_message("Загрузка...")
@@ -4124,7 +3854,10 @@ def show_picker(toggle=True):
     update_picker_timer_label()
     flush_pending_picker_refresh_paste()
 
-    if not has_real_picker_items(picker_items) and not picker_refreshing:
+    if (
+        not has_real_picker_items(picker_refresh.items)
+        and not picker_refresh.refreshing
+    ):
         threading.Thread(
             target=lambda: refresh_picker_and_repaint(force=True),
             daemon=True,
@@ -4136,7 +3869,6 @@ def right_shift_worker():
     global right_arrow_was_down, right_ctrl_was_down
     global up_arrow_was_down, up_arrow_press_at, up_arrow_hold_triggered
     global down_arrow_was_down, down_arrow_press_at, down_arrow_hold_triggered
-    global salvage_delete_was_down
 
     while True:
         try:
@@ -4211,15 +3943,22 @@ def right_shift_worker():
             if not end_down and end_ready_to_release:
                 finish_picker_end_press()
 
+            with salvage_state.lifecycle_lock:
+                salvage_pair_armed = salvage_state.pair_armed
             if salvage_pair_armed and is_any_non_delete_key_down():
                 reset_salvage_del_pair("other key")
 
             delete_down = is_virtual_key_down(VK_DELETE)
-            if delete_down and not salvage_delete_was_down:
-                salvage_delete_was_down = True
+            handle_delete = False
+            with salvage_state.lifecycle_lock:
+                if delete_down and not salvage_state.delete_was_down:
+                    salvage_state.delete_was_down = True
+                    handle_delete = True
+                elif not delete_down:
+                    salvage_state.delete_was_down = False
+
+            if handle_delete:
                 root.after(0, lambda: handle_salvage_del_press(ignore_latch=True))
-            elif not delete_down:
-                salvage_delete_was_down = False
         except Exception as e:
             log_error("right_shift", f"Right Shift worker failed: {e}")
 
@@ -4471,7 +4210,7 @@ def main():
 
     load_picker_cache()
     create_picker_window()
-    if picker_items:
+    if picker_refresh.items:
         populate_picker()
     threading.Thread(target=timer_worker, daemon=True).start()
     hotkeys.start()
