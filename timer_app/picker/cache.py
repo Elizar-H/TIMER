@@ -12,7 +12,7 @@ def load_picker_cache(path=PICKER_CACHE_PATH):
     try:
         with path.open("r", encoding="utf-8") as cache_file:
             data = json.load(cache_file)
-    except Exception:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
         return None
 
     if not isinstance(data, dict):
@@ -32,7 +32,7 @@ def load_picker_cache(path=PICKER_CACHE_PATH):
         try:
             saved_dt = datetime.fromisoformat(saved_at)
             age_seconds = max(0, (datetime.now() - saved_dt).total_seconds())
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             pass
 
     return items, age_seconds

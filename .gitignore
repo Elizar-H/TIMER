@@ -4,6 +4,7 @@ __pycache__/
 
 timer.log
 timer_items_cache.json
+tests
 
 .venv/
 venv/

@@ -412,7 +412,7 @@ def _load_json(path):
             with path.open("r", encoding="utf-8") as json_file:
                 value = json.load(json_file)
                 return value if isinstance(value, dict) else {}
-    except Exception:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
         pass
     return {}
 
@@ -431,7 +431,7 @@ def apply_legacy_coordinate_settings(coordinates, settings_path):
                 point_name,
                 deepcopy(DEFAULT_COORDINATES.get(point_name, {})),
             )[axis] = float(value)
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             continue
 
     return result

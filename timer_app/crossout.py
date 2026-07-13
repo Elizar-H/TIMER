@@ -139,7 +139,7 @@ def parse_number_from_storage_text(text, min_value=None, max_value=None, prefer=
         for prefix in prefixes:
             try:
                 value = float(prefix)
-            except Exception:
+            except (ValueError, OverflowError):
                 continue
             if value.is_integer():
                 value = int(value)
@@ -258,7 +258,7 @@ def coerce_storage_value(value):
     if value.startswith("["):
         try:
             return json.loads(value)
-        except Exception:
+        except (json.JSONDecodeError, RecursionError):
             return None
     if value in ("s", "b"):
         return value
@@ -266,7 +266,7 @@ def coerce_storage_value(value):
     try:
         number = float(value)
         return int(number) if number.is_integer() else number
-    except Exception:
+    except (ValueError, OverflowError):
         return None
 
 
@@ -317,13 +317,13 @@ def read_crossoutcore_filters():
             ),
             key=lambda path: path.stat().st_mtime,
         )
-    except Exception:
+    except OSError:
         return filters
 
     for path in files:
         try:
             data = path.read_bytes()
-        except Exception:
+        except OSError:
             continue
 
         if b"crossoutcore.ru" not in data and not any(
@@ -390,7 +390,7 @@ def read_crossoutcore_filters():
         for rarity in filters["recycling_rarities"]:
             try:
                 normalized_rarity = int(rarity)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
                 continue
             if normalized_rarity not in normalized_rarities:
                 normalized_rarities.append(normalized_rarity)
@@ -493,7 +493,7 @@ def fetch_market_minutes():
 def decode_json_string(value):
     try:
         return json.loads(f'"{value}"')
-    except Exception:
+    except json.JSONDecodeError:
         return value.replace('\\"', '"')
 
 
@@ -691,7 +691,7 @@ def normalize_selected_rarities(rarities):
     for rarity in rarities or []:
         try:
             rarity_id = int(rarity)
-        except Exception:
+        except (TypeError, ValueError, OverflowError):
             continue
         if rarity_id in RESOURCE_RECIPES and rarity_id not in selected:
             selected.append(rarity_id)

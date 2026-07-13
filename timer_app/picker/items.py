@@ -42,7 +42,7 @@ def format_picker_number(value):
         return ""
     try:
         return f"{float(value):.2f}"
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return ""
 
 
@@ -51,7 +51,7 @@ def format_picker_int(value):
         return ""
     try:
         return str(int(value))
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return ""
 
 
@@ -62,7 +62,7 @@ def format_picker_roi(item):
     try:
         sign = "+" if get_picker_item_kind(item) == "decor" and roi > 0 else ""
         return f"{sign}{float(roi):.2f}%"
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return ""
 
 
@@ -71,7 +71,7 @@ def get_rarity_style(rarity_id):
 
     try:
         rarity_id = int(rarity_id)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return {"name": "", "short": "", "color": "#f0cf23"}
     return RARITY_STYLES.get(
         rarity_id,

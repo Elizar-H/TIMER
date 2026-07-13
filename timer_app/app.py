@@ -10,12 +10,18 @@ from timer_app.actions.market import (
     MarketActionState,
     OrderCompleteProbeDependencies,
     OrderCompleteProbeState,
+    SafeBuyWorkflowConfig,
+    SafeBuyWorkflowDependencies,
     STAGE_BUY,
     STAGE_OPEN_CARD,
     STAGE_OPENING_BUY_DIALOG,
     STAGE_OPENING_CARD,
     STAGE_QUANTITY,
+    matches_market_tab_active_pixel,
+    navigate_back_from_market_card,
+    open_market_subtab,
     run_order_complete_probe,
+    run_safe_buy_workflow as run_safe_buy_workflow_core,
 )
 from timer_app.actions.salvage import (
     SalvageRuntimeState,
@@ -53,7 +59,7 @@ from timer_app.crossout import (
     read_crossoutcore_filters_cached,
 )
 from timer_app.game import GameActions
-from timer_app.hotkeys import HotkeyWorker
+from timer_app.hotkeys import HotkeyWorker, PickerInputState
 from timer_app.log import append_log_line, log_error
 from timer_app.market_sell_reader import (
     format_price_from_cents,
@@ -75,7 +81,12 @@ from timer_app.picker.cache import (
     load_picker_cache as load_picker_cache_file,
     save_picker_cache as save_picker_cache_file,
 )
-from timer_app.picker.data import PickerDataService, PickerRefreshState
+from timer_app.picker.data import (
+    PendingPickerSelectionState,
+    PickerDataService,
+    PickerRefreshState,
+    PickerSelectionState,
+)
 from timer_app.picker.items import (
     build_picker_display_rows as build_picker_display_rows_data,
     count_real_picker_items,
@@ -89,7 +100,21 @@ from timer_app.picker.items import (
     get_rarity_style,
     has_real_picker_items,
 )
-from timer_app.picker.paste import normalize_game_search_text
+from timer_app.picker.paste import (
+    PickerPasteState,
+    find_picker_row_by_item_name as find_picker_row_by_item_name_data,
+    get_picker_item_match_name as get_picker_item_match_name_data,
+    get_selected_picker_item_name as get_selected_picker_item_name_data,
+    normalize_game_search_text,
+    run_picker_action_when_ready,
+)
+from timer_app.picker.ui import (
+    draw_cell as draw_picker_cell_ui,
+    draw_rounded_outline as draw_picker_rounded_outline_ui,
+    draw_rounded_rect as draw_picker_rounded_rect_ui,
+    fit_canvas_text as fit_picker_canvas_text_ui,
+    get_hover_background as get_picker_hover_bg_ui,
+)
 from timer_app.timer import (
     TimerState,
     format_age as format_timer_age,
@@ -124,6 +149,7 @@ from timer_app.winapi import (
     enable_dpi_awareness,
     get_cursor_pos,
     get_screen_pixel_rgb,
+    get_screen_pixels_rgb,
     hide_console,
     is_virtual_key_down,
     send_ctrl_key,
@@ -610,50 +636,22 @@ picker_status_label = None
 picker_target_hwnd = None
 picker_display_rows = []
 picker_total_content_height = 0
-picker_hover_row_index = None
-picker_selected_row_index = None
-picker_pending_row_index = None
-picker_pending_selection_token = 0
+picker_selection = PickerSelectionState()
+pending_picker_selection = PendingPickerSelectionState()
 picker_font_cache = {}
 picker_columns_cache = {}
 picker_current_width = PICKER_WIDTH
-picker_actions_enabled = False
 right_shift_order_down = False
-right_ctrl_was_down = False
-right_arrow_was_down = False
-right_arrow_press_at = 0
-right_arrow_hold_active = False
-right_arrow_hold_compensated = False
-right_arrow_last_action_stage = None
 order_complete_probe_state = OrderCompleteProbeState()
 market_current_subtab = MARKET_SUBTAB_DETAILS
 market_safe_buy_lock = threading.Lock()
 safe_buy_attempted_for_current_card = False
-up_arrow_was_down = False
-up_arrow_press_at = 0
-up_arrow_hold_triggered = False
-down_arrow_was_down = False
-down_arrow_press_at = 0
-down_arrow_hold_triggered = False
-picker_end_hold_pending = False
-picker_end_hold_consumed = False
-picker_end_press_active = False
-picker_end_press_was_open = False
-picker_end_started_in_game = False
-picker_end_hold_triggered = False
-picker_end_background_hold_triggered = False
-picker_end_latched = False
-picker_end_press_at = 0
-picker_end_ignore_until = 0
-picker_end_previous_hwnd = 0
+picker_input_state = PickerInputState()
 salvage_state = SalvageRuntimeState()
 market_action_state = MarketActionState(MARKET_ACTION_STAGE_MAX_AGE_SECONDS)
 picker_render_signature = None
 picker_refresh_needs_decor_selection = False
-last_picker_paste_at = 0
-last_picker_paste_name = None
-picker_refresh_paste_pending_name = None
-picker_refresh_paste_pending_row_index = None
+picker_paste_state = PickerPasteState()
 last_alert_context_hwnd = None
 single_instance_mutex = None
 overlay_width = BASE_NOTCH_WIDTH
@@ -1321,12 +1319,12 @@ def send_game_to_background():
     hide_picker()
     minimized = minimize_window(game_hwnd)
     if (
-        picker_end_previous_hwnd
-        and is_live_window(picker_end_previous_hwnd)
-        and not is_own_overlay_hwnd(picker_end_previous_hwnd)
-        and not is_game_window(picker_end_previous_hwnd)
+        picker_input_state.end_previous_hwnd
+        and is_live_window(picker_input_state.end_previous_hwnd)
+        and not is_own_overlay_hwnd(picker_input_state.end_previous_hwnd)
+        and not is_game_window(picker_input_state.end_previous_hwnd)
     ):
-        force_foreground_window(picker_end_previous_hwnd)
+        force_foreground_window(picker_input_state.end_previous_hwnd)
     return minimized
 
 
@@ -1550,24 +1548,23 @@ def detect_market_action_stage():
 
 def open_selected_market_card():
     point_name = "market.open_card"
-    if should_open_second_search_result(last_picker_paste_name):
+    if should_open_second_search_result(picker_paste_state.last_name):
         point_name = "market.second_search_result"
 
     ok = game.click(point_name)
     if point_name != "market.open_card":
         append_log_line(
             "market navigation: open second search result "
-            f"name={last_picker_paste_name!r} ok={ok}"
+            f"name={picker_paste_state.last_name!r} ok={ok}"
         )
     return ok
 
 
 def go_back_from_market_card():
-    hwnd = get_picker_action_hwnd()
-    if not hwnd:
-        return False
-    tap_key_scancode(VK_ESCAPE, delay=0.010)
-    return True
+    return navigate_back_from_market_card(
+        get_action_hwnd=lambda: get_picker_action_hwnd(),
+        tap_escape=lambda: tap_key_scancode(VK_ESCAPE, delay=0.010),
+    )
 
 
 def buy_current_market_item():
@@ -1668,108 +1665,53 @@ def start_market_safe_buy_workflow():
 
 
 def run_market_safe_buy_workflow():
-    old_clipboard = None
-    old_clipboard_saved = False
-    order_window_confirmed = False
-
     try:
-        selected = wait_for_valid_sell_offer(
-            MARKET_SAFE_BUY_WAIT_SECONDS,
-            MARKET_SAFE_BUY_POLL_SECONDS,
+        run_safe_buy_workflow_core(
+            SafeBuyWorkflowConfig(
+                offer_wait_seconds=MARKET_SAFE_BUY_WAIT_SECONDS,
+                offer_poll_seconds=MARKET_SAFE_BUY_POLL_SECONDS,
+            ),
+            SafeBuyWorkflowDependencies(
+                wait_for_offer=lambda wait_seconds, poll_seconds: (
+                    wait_for_valid_sell_offer(wait_seconds, poll_seconds)
+                ),
+                format_price=lambda price_cents: format_price_from_cents(
+                    price_cents
+                ),
+                get_clipboard_text=lambda: get_clipboard_text_safe(),
+                set_clipboard_text=lambda text: set_clipboard_text_safe(text),
+                monotonic_ns=lambda: time.monotonic_ns(),
+                buy_current_item=lambda: buy_current_market_item(),
+                wait_for_clipboard_price=lambda sentinel, selected_offer: (
+                    wait_market_clipboard_price_cents(
+                        sentinel,
+                        selected_offer,
+                    )
+                ),
+                click_quantity_field=lambda: game.click_screen(
+                    "market.order_quantity_field"
+                ),
+                send_select_all=lambda: send_ctrl_key(
+                    VK_A,
+                    PASTE_BETWEEN_KEYS_DELAY,
+                ),
+                send_paste=lambda: send_ctrl_key(
+                    VK_V,
+                    PASTE_BETWEEN_KEYS_DELAY,
+                ),
+                wait_before_clipboard_restore=lambda: time.sleep(
+                    PASTE_BETWEEN_KEYS_DELAY
+                ),
+                escape_once=lambda reason: market_safe_buy_escape_once(reason),
+                escape_four_times=lambda reason: (
+                    market_safe_buy_escape_twice(reason)
+                ),
+                append_log_line=lambda message: append_log_line(message),
+                log_error=lambda context, message: log_error(context, message),
+            ),
         )
-        if selected is None:
-            append_log_line("[MARKET_SAFE_BUY] no_valid_sell_offer_before_timeout")
-            market_safe_buy_escape_once("no_valid_sell_offer_before_timeout")
-            return
-
-        append_log_line(
-            "[MARKET_SAFE_BUY] selected "
-            f"row={selected.row} "
-            f"price={format_price_from_cents(selected.price_cents)} "
-            f"qty={selected.qty} "
-            f"score_price={selected.price_score:.3f} "
-            f"score_qty={selected.qty_score:.3f}"
-        )
-
-        selected_offer = selected
-        old_clipboard = get_clipboard_text_safe()
-        old_clipboard_saved = old_clipboard is not None
-        sentinel = f"__MARKET_SAFE_BUY_WAITING_{time.monotonic_ns()}__"
-        if not set_clipboard_text_safe(sentinel):
-            append_log_line("[MARKET_SAFE_BUY] clipboard_sentinel_set_failed")
-            market_safe_buy_escape_once("clipboard_sentinel_set_failed")
-            return
-
-        if not buy_current_market_item():
-            append_log_line("[MARKET_SAFE_BUY] buy_click_failed")
-            market_safe_buy_escape_once("buy_click_failed")
-            return
-
-        clipboard_text, clipboard_price_cents = wait_market_clipboard_price_cents(
-            sentinel,
-            selected_offer,
-        )
-        if clipboard_text is None:
-            append_log_line("[MARKET_SAFE_BUY] clipboard_timeout")
-            market_safe_buy_escape_twice("clipboard_timeout")
-            return
-
-        if clipboard_price_cents is None:
-            append_log_line(
-                "[MARKET_SAFE_BUY] clipboard_parse_error "
-                f"value={clipboard_text!r}"
-            )
-
-        if clipboard_price_cents != selected_offer.price_cents:
-            append_log_line(
-                "[MARKET_SAFE_BUY] price_mismatch "
-                f"selected={selected_offer.price_cents} "
-                f"clipboard={clipboard_price_cents} raw={clipboard_text!r}"
-            )
-            market_safe_buy_escape_twice("price_mismatch")
-            return
-
-        order_window_confirmed = True
-        qty_text = str(selected_offer.qty)
-        if not set_clipboard_text_safe(qty_text):
-            append_log_line(
-                "[MARKET_SAFE_BUY] qty_clipboard_verify_error "
-                f"expected={qty_text!r} actual=None"
-            )
-            market_safe_buy_escape_twice("qty_clipboard_set_failed")
-            return
-
-        clipboard_qty = get_clipboard_text_safe()
-        if clipboard_qty is None or clipboard_qty.strip() != qty_text:
-            append_log_line(
-                "[MARKET_SAFE_BUY] qty_clipboard_verify_error "
-                f"expected={qty_text!r} actual={clipboard_qty!r}"
-            )
-            market_safe_buy_escape_twice("qty_clipboard_verify_error")
-            return
-
-        if not game.click_screen("market.order_quantity_field"):
-            append_log_line("[MARKET_SAFE_BUY] quantity_field_click_failed")
-            market_safe_buy_escape_twice("quantity_field_click_failed")
-            return
-
-        send_ctrl_key(VK_A, PASTE_BETWEEN_KEYS_DELAY)
-        send_ctrl_key(VK_V, PASTE_BETWEEN_KEYS_DELAY)
-        append_log_line(f"[MARKET_SAFE_BUY] qty_pasted qty={qty_text}")
-    except Exception as exc:
-        append_log_line(f"[MARKET_SAFE_BUY] unexpected_exception {exc}")
-        log_error("market_safe_buy", f"Safe-buy workflow failed: {exc}")
-        if order_window_confirmed:
-            market_safe_buy_escape_twice("unexpected_exception")
-        else:
-            market_safe_buy_escape_once("unexpected_exception")
     finally:
-        try:
-            if old_clipboard_saved:
-                time.sleep(PASTE_BETWEEN_KEYS_DELAY)
-                set_clipboard_text_safe(old_clipboard)
-        finally:
-            market_safe_buy_lock.release()
+        market_safe_buy_lock.release()
 
 
 def increase_market_item_quantity():
@@ -1819,17 +1761,10 @@ def read_market_tab_probe():
 
 
 def is_market_tab_active_pixel(rgb):
-    if rgb is None:
-        return False
-
-    red, green, blue = rgb
-    target_red, target_green, target_blue = MARKET_TAB_ACTIVE_RGB
-    return (
-        abs(red - target_red) <= MARKET_TAB_ACTIVE_TOLERANCE
-        and abs(green - target_green) <= MARKET_TAB_ACTIVE_TOLERANCE
-        and abs(blue - target_blue) <= MARKET_TAB_ACTIVE_TOLERANCE
-        and red > green + 45
-        and green > blue + 60
+    return matches_market_tab_active_pixel(
+        rgb,
+        MARKET_TAB_ACTIVE_RGB,
+        MARKET_TAB_ACTIVE_TOLERANCE,
     )
 
 
@@ -1971,23 +1906,16 @@ def wait_market_order_complete_probe_if_running():
 
 
 def cancel_pending_picker_selection(redraw=False):
-    global picker_pending_row_index, picker_pending_selection_token
-
-    picker_pending_selection_token += 1
-    picker_pending_row_index = None
+    pending_picker_selection.cancel()
     if redraw:
-        draw_picker_hover(picker_selected_row_index)
+        draw_picker_hover(picker_selection.selected_row_index)
 
 
 def begin_pending_picker_selection(row_index, item_name):
-    global picker_pending_row_index, picker_pending_selection_token
-
     if not is_market_order_complete_probe_running():
         return False
 
-    picker_pending_selection_token += 1
-    token = picker_pending_selection_token
-    picker_pending_row_index = row_index
+    token = pending_picker_selection.begin(row_index)
     draw_picker_hover(row_index)
 
     def wait_and_finish():
@@ -2007,24 +1935,25 @@ def begin_pending_picker_selection(row_index, item_name):
 
 
 def finish_pending_picker_selection(token, row_index, item_name, wait_ok):
-    global picker_pending_row_index
-
-    if token != picker_pending_selection_token:
+    if not pending_picker_selection.complete_if_current(token):
         return
 
-    picker_pending_row_index = None
-    draw_picker_hover(picker_selected_row_index)
+    draw_picker_hover(picker_selection.selected_row_index)
 
     if not wait_ok:
         append_log_line("market navigation: order complete probe wait failed")
         return
-    if picker_selected_row_index != row_index:
-        return
-    if not ensure_market_ready_for_picker_selection():
+    if picker_selection.selected_row_index != row_index:
         return
 
-    reset_market_action_stage()
-    paste_item_name(item_name)
+    def paste_selection():
+        reset_market_action_stage()
+        paste_item_name(item_name)
+
+    run_picker_action_when_ready(
+        ensure_market_ready=lambda: ensure_market_ready_for_picker_selection(),
+        ready_action=paste_selection,
+    )
 
 
 def open_game_market_details():
@@ -2039,22 +1968,21 @@ def open_game_market_lots():
 
 
 def open_game_market_subtab(tab_point_name, subtab_name):
-    global market_current_subtab
+    def set_current_subtab(value):
+        global market_current_subtab
 
-    if is_market_view_active():
-        clicked_market = True
-    else:
-        clicked_market = game.click("market.market_tab")
-        if not clicked_market:
-            return False
-        time.sleep(GAME_SECTION_CLICK_DELAY_SECONDS)
+        market_current_subtab = value
 
-    clicked_tab = game.click(tab_point_name)
-    if clicked_market or clicked_tab:
-        if clicked_tab:
-            market_current_subtab = subtab_name
-        reset_market_action_stage()
-    return clicked_market and clicked_tab
+    return open_market_subtab(
+        tab_point_name,
+        subtab_name,
+        is_market_view_active=lambda: is_market_view_active(),
+        click=lambda point_name: game.click(point_name),
+        sleep=lambda seconds: time.sleep(seconds),
+        get_section_delay_seconds=lambda: GAME_SECTION_CLICK_DELAY_SECONDS,
+        set_current_subtab=set_current_subtab,
+        reset_action_stage=lambda: reset_market_action_stage(),
+    )
 
 
 def reassert_picker_window():
@@ -2093,8 +2021,6 @@ def get_market_action_stage():
 
 
 def handle_market_action_right():
-    global right_arrow_last_action_stage
-
     now = time.monotonic()
     detected_stage = detect_market_action_stage()
 
@@ -2102,12 +2028,12 @@ def handle_market_action_right():
         return False
 
     if detected_stage == STAGE_QUANTITY:
-        right_arrow_last_action_stage = STAGE_QUANTITY
+        picker_input_state.right_arrow_last_action_stage = STAGE_QUANTITY
         set_market_action_stage(STAGE_QUANTITY, 0)
         return increase_market_item_quantity()
 
     if detected_stage == STAGE_BUY:
-        right_arrow_last_action_stage = STAGE_BUY
+        picker_input_state.right_arrow_last_action_stage = STAGE_BUY
         if is_market_safe_buy_guard_active():
             return False
         return start_market_safe_buy_workflow()
@@ -2115,7 +2041,7 @@ def handle_market_action_right():
     if get_market_action_stage() == STAGE_OPENING_BUY_DIALOG:
         return False
 
-    right_arrow_last_action_stage = STAGE_OPEN_CARD
+    picker_input_state.right_arrow_last_action_stage = STAGE_OPEN_CARD
     ok = open_selected_market_card()
     if ok and market_action_state.stage != STAGE_OPENING_CARD:
         set_market_action_stage(STAGE_OPENING_CARD, now + GAME_OPEN_TO_BUY_DELAY_SECONDS)
@@ -2131,30 +2057,28 @@ def handle_market_action_left():
 
 
 def resolve_picker_end_hold(expected_press_at):
-    global picker_end_hold_pending, picker_end_hold_triggered
-    global picker_end_background_hold_triggered
-
-    if expected_press_at != picker_end_press_at:
+    if expected_press_at != picker_input_state.end_press_at:
         return
 
-    picker_end_hold_pending = False
-    if picker_end_hold_triggered:
+    picker_input_state.end_hold_pending = False
+    if picker_input_state.end_hold_triggered:
         return
 
     if is_virtual_key_down(VK_END):
-        picker_end_hold_triggered = True
-        picker_end_background_hold_triggered = True
+        picker_input_state.end_hold_triggered = True
+        picker_input_state.end_background_hold_triggered = True
         send_game_to_background()
 
 
 def schedule_picker_end_hold_check():
-    global picker_end_hold_pending
-
-    if picker_end_hold_pending or picker_end_hold_triggered:
+    if (
+        picker_input_state.end_hold_pending
+        or picker_input_state.end_hold_triggered
+    ):
         return
 
-    picker_end_hold_pending = True
-    press_at = picker_end_press_at
+    picker_input_state.end_hold_pending = True
+    press_at = picker_input_state.end_press_at
     root.after(
         max(1, int(PICKER_OPEN_HOLD_SECONDS * 1000)),
         lambda: resolve_picker_end_hold(press_at),
@@ -2162,64 +2086,63 @@ def schedule_picker_end_hold_check():
 
 
 def handle_picker_end_hotkey():
-    global picker_end_press_active, picker_end_press_was_open, picker_end_hold_triggered
-    global picker_end_background_hold_triggered, picker_end_latched, picker_end_press_at
-    global picker_end_previous_hwnd, picker_end_started_in_game
-
-    if time.monotonic() < picker_end_ignore_until:
+    if time.monotonic() < picker_input_state.end_ignore_until:
         return
 
-    if picker_end_latched or picker_end_press_active:
+    if picker_input_state.end_latched or picker_input_state.end_press_active:
         return
 
-    picker_end_latched = True
-    picker_end_press_at = time.monotonic()
-    picker_end_press_active = True
-    picker_end_press_was_open = is_picker_open()
-    picker_end_started_in_game = False
-    picker_end_hold_triggered = False
-    picker_end_background_hold_triggered = False
+    picker_input_state.end_latched = True
+    picker_input_state.end_press_at = time.monotonic()
+    picker_input_state.end_press_active = True
+    picker_input_state.end_press_was_open = is_picker_open()
+    picker_input_state.end_started_in_game = False
+    picker_input_state.end_hold_triggered = False
+    picker_input_state.end_background_hold_triggered = False
     foreground_hwnd = get_foreground_hwnd()
-    picker_end_started_in_game = bool(foreground_hwnd and is_game_window(foreground_hwnd))
+    foreground_is_game = bool(
+        foreground_hwnd and is_game_window(foreground_hwnd)
+    )
+    picker_input_state.end_started_in_game = foreground_is_game
     if (
         foreground_hwnd
         and not is_own_overlay_hwnd(foreground_hwnd)
-        and not is_game_window(foreground_hwnd)
+        and not foreground_is_game
     ):
-        picker_end_previous_hwnd = foreground_hwnd
+        picker_input_state.end_previous_hwnd = foreground_hwnd
     else:
-        picker_end_previous_hwnd = 0
+        picker_input_state.end_previous_hwnd = 0
 
-    if picker_end_started_in_game and not picker_end_press_was_open:
+    if (
+        picker_input_state.end_started_in_game
+        and not picker_input_state.end_press_was_open
+    ):
         show_picker(toggle=False)
 
     schedule_picker_end_hold_check()
 
 
 def finish_picker_end_press():
-    global picker_end_press_active, picker_end_hold_pending, picker_end_latched
-    global picker_end_ignore_until, picker_end_started_in_game
-
-    if not picker_end_press_active:
-        picker_end_latched = False
-        picker_end_started_in_game = False
+    if not picker_input_state.end_press_active:
+        picker_input_state.end_latched = False
+        picker_input_state.end_started_in_game = False
         return
 
-    started_in_game = picker_end_started_in_game
-    picker_end_press_active = False
-    picker_end_hold_pending = False
-    picker_end_latched = False
-    picker_end_started_in_game = False
+    started_in_game = picker_input_state.end_started_in_game
+    picker_input_state.end_press_active = False
+    picker_input_state.end_hold_pending = False
+    picker_input_state.end_latched = False
+    picker_input_state.end_started_in_game = False
 
-    if picker_end_hold_triggered:
-        picker_end_ignore_until = time.monotonic() + 0.35
+    if picker_input_state.end_hold_triggered:
+        picker_input_state.end_ignore_until = time.monotonic() + 0.35
         return
 
     if not started_in_game:
         open_picker_market_details()
         return
 
-    if picker_end_press_was_open:
+    if picker_input_state.end_press_was_open:
         hide_picker()
     elif not is_picker_open():
         show_picker(toggle=False)
@@ -2280,13 +2203,17 @@ def get_screen_point_pixel_samples(point_name):
         return None
 
     x, y = point
-    samples = []
+    sample_points = []
     for offset_x, offset_y in WHITE_PIXEL_SAMPLE_OFFSETS:
         sample_x = x + offset_x
         sample_y = y + offset_y
-        samples.append((sample_x, sample_y, get_screen_pixel_rgb(sample_x, sample_y)))
+        sample_points.append((sample_x, sample_y))
 
-    return samples
+    pixels = get_screen_pixels_rgb(sample_points)
+    return [
+        (sample_x, sample_y, rgb)
+        for (sample_x, sample_y), rgb in zip(sample_points, pixels)
+    ]
 
 
 def first_white_screen_sample(point_name):
@@ -2732,14 +2659,16 @@ def should_open_second_search_result(item_name):
 
 
 def paste_item_name(name):
-    global last_picker_paste_at, last_picker_paste_name, picker_target_hwnd
+    global picker_target_hwnd
 
     name = normalize_game_search_text(name)
     now = time.monotonic()
-    if name == last_picker_paste_name and now - last_picker_paste_at < 0.5:
+    if (
+        name == picker_paste_state.last_name
+        and now - picker_paste_state.last_at < 0.5
+    ):
         return
-    last_picker_paste_at = now
-    last_picker_paste_name = name
+    picker_paste_state.remember(name, now)
 
     target_hwnd = picker_target_hwnd
 
@@ -2784,57 +2713,30 @@ def paste_item_name(name):
 
 
 def get_selected_picker_item_name():
-    if picker_selected_row_index is None:
-        return None
-    if (
-        picker_selected_row_index < 0
-        or picker_selected_row_index >= len(picker_display_rows)
-    ):
-        return None
-
-    row = picker_display_rows[picker_selected_row_index]
-    item = row.get("item")
-    if row.get("type") != "item" or not item:
-        return None
-
-    return item.get("name")
+    return get_selected_picker_item_name_data(
+        picker_display_rows,
+        picker_selection.selected_row_index,
+    )
 
 
 def get_picker_item_match_name(name):
-    if not name:
-        return None
-
-    match_name = normalize_game_search_text(name)
-    return match_name or None
+    return get_picker_item_match_name_data(name)
 
 
 def find_picker_row_by_item_name(item_name):
-    match_name = get_picker_item_match_name(item_name)
-    if not match_name:
-        return None
-
-    for row_index, row in enumerate(picker_display_rows):
-        item = row.get("item")
-        if row.get("type") != "item" or not item:
-            continue
-
-        if get_picker_item_match_name(item.get("name")) == match_name:
-            return row_index
-
-    return None
+    return find_picker_row_by_item_name_data(
+        picker_display_rows,
+        item_name,
+    )
 
 
 def restore_picker_selection_by_name(item_name):
-    global picker_selected_row_index, picker_hover_row_index
-
     row_index = find_picker_row_by_item_name(item_name)
     if row_index is None:
-        picker_selected_row_index = None
-        picker_hover_row_index = None
+        picker_selection.clear()
         return False
 
-    picker_selected_row_index = row_index
-    picker_hover_row_index = row_index
+    picker_selection.select(row_index)
     return True
 
 
@@ -2852,8 +2754,7 @@ def get_first_decor_picker_row_index():
 
 
 def select_first_decor_picker_row_after_refresh():
-    global picker_hover_row_index, picker_refresh_needs_decor_selection
-    global picker_selected_row_index
+    global picker_refresh_needs_decor_selection
 
     if not picker_refresh_needs_decor_selection:
         return False
@@ -2867,17 +2768,13 @@ def select_first_decor_picker_row_after_refresh():
         picker_refresh_needs_decor_selection = False
         return False
 
-    picker_selected_row_index = row_index
-    picker_hover_row_index = row_index
+    picker_selection.select(row_index)
     picker_refresh_needs_decor_selection = False
     return True
 
 
 def clear_pending_picker_refresh_paste():
-    global picker_refresh_paste_pending_name, picker_refresh_paste_pending_row_index
-
-    picker_refresh_paste_pending_name = None
-    picker_refresh_paste_pending_row_index = None
+    picker_paste_state.clear_refresh()
 
 
 def is_picker_refresh_paste_ready():
@@ -2891,9 +2788,7 @@ def is_picker_refresh_paste_ready():
 
 
 def flush_pending_picker_refresh_paste():
-    global picker_refresh_paste_pending_name
-
-    if not picker_refresh_paste_pending_name:
+    if not picker_paste_state.refresh_name:
         return False
     if not is_picker_refresh_paste_ready():
         return False
@@ -2901,39 +2796,44 @@ def flush_pending_picker_refresh_paste():
     selected_name = get_selected_picker_item_name()
     if (
         selected_name
-        and picker_refresh_paste_pending_row_index == picker_selected_row_index
+        and picker_paste_state.refresh_row_index
+        == picker_selection.selected_row_index
     ):
-        picker_refresh_paste_pending_name = normalize_game_search_text(selected_name)
+        picker_paste_state.refresh_name = normalize_game_search_text(
+            selected_name
+        )
 
-    name = picker_refresh_paste_pending_name
-    if not name or name == last_picker_paste_name:
+    name = picker_paste_state.refresh_name
+    if not name or name == picker_paste_state.last_name:
         clear_pending_picker_refresh_paste()
         return False
 
-    if not ensure_market_ready_for_picker_selection():
-        return False
+    def paste_refreshed_selection():
+        clear_pending_picker_refresh_paste()
+        reset_market_action_stage()
+        paste_item_name(name)
 
-    clear_pending_picker_refresh_paste()
-    reset_market_action_stage()
-    paste_item_name(name)
-    return True
+    return run_picker_action_when_ready(
+        ensure_market_ready=lambda: ensure_market_ready_for_picker_selection(),
+        ready_action=paste_refreshed_selection,
+    )
 
 
 def sync_selected_picker_name_after_refresh():
-    global picker_refresh_paste_pending_name, picker_refresh_paste_pending_row_index
-
     selected_name = get_selected_picker_item_name()
     if not selected_name:
         clear_pending_picker_refresh_paste()
         return
 
     selected_name = normalize_game_search_text(selected_name)
-    if not selected_name or selected_name == last_picker_paste_name:
+    if not selected_name or selected_name == picker_paste_state.last_name:
         clear_pending_picker_refresh_paste()
         return
 
-    picker_refresh_paste_pending_name = selected_name
-    picker_refresh_paste_pending_row_index = picker_selected_row_index
+    picker_paste_state.queue_refresh(
+        selected_name,
+        picker_selection.selected_row_index,
+    )
     flush_pending_picker_refresh_paste()
 
 
@@ -3083,92 +2983,42 @@ def get_picker_canvas_font(size=9, weight="bold"):
 
 
 def fit_picker_canvas_text(text, font, max_width):
-    text = "" if text is None else str(text)
-    if font.measure(text) <= max_width:
-        return text
-
-    ellipsis = "..."
-    max_width = max(0, max_width - font.measure(ellipsis))
-    while text and font.measure(text) > max_width:
-        text = text[:-1]
-    return text + ellipsis if text else ellipsis
+    return fit_picker_canvas_text_ui(text, font, max_width)
 
 
 def draw_picker_rounded_rect(x1, y1, x2, y2, radius, fill, outline=""):
-    if picker_canvas is None:
-        return
-
-    radius = max(1, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
-    picker_canvas.create_rectangle(x1 + radius, y1, x2 - radius, y2, fill=fill, outline=outline)
-    picker_canvas.create_rectangle(x1, y1 + radius, x2, y2 - radius, fill=fill, outline=outline)
-    picker_canvas.create_oval(x1, y1, x1 + radius * 2, y1 + radius * 2, fill=fill, outline=outline)
-    picker_canvas.create_oval(x2 - radius * 2, y1, x2, y1 + radius * 2, fill=fill, outline=outline)
-    picker_canvas.create_oval(x1, y2 - radius * 2, x1 + radius * 2, y2, fill=fill, outline=outline)
-    picker_canvas.create_oval(x2 - radius * 2, y2 - radius * 2, x2, y2, fill=fill, outline=outline)
+    return draw_picker_rounded_rect_ui(
+        picker_canvas,
+        x1,
+        y1,
+        x2,
+        y2,
+        radius,
+        fill,
+        outline,
+    )
 
 
 def draw_picker_rounded_outline(x1, y1, x2, y2, radius, color, width=1):
-    if picker_canvas is None:
-        return
-
-    radius = max(1, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
-    picker_canvas.create_line(x1 + radius, y1, x2 - radius, y1, fill=color, width=width)
-    picker_canvas.create_line(x2, y1 + radius, x2, y2 - radius, fill=color, width=width)
-    picker_canvas.create_line(x1 + radius, y2, x2 - radius, y2, fill=color, width=width)
-    picker_canvas.create_line(x1, y1 + radius, x1, y2 - radius, fill=color, width=width)
-    picker_canvas.create_arc(
+    return draw_picker_rounded_outline_ui(
+        picker_canvas,
         x1,
         y1,
-        x1 + radius * 2,
-        y1 + radius * 2,
-        start=90,
-        extent=90,
-        style="arc",
-        outline=color,
-        width=width,
-    )
-    picker_canvas.create_arc(
-        x2 - radius * 2,
-        y1,
-        x2,
-        y1 + radius * 2,
-        start=0,
-        extent=90,
-        style="arc",
-        outline=color,
-        width=width,
-    )
-    picker_canvas.create_arc(
-        x2 - radius * 2,
-        y2 - radius * 2,
         x2,
         y2,
-        start=270,
-        extent=90,
-        style="arc",
-        outline=color,
-        width=width,
-    )
-    picker_canvas.create_arc(
-        x1,
-        y2 - radius * 2,
-        x1 + radius * 2,
-        y2,
-        start=180,
-        extent=90,
-        style="arc",
-        outline=color,
-        width=width,
+        radius,
+        color,
+        width,
     )
 
 
 def clear_picker_rows():
-    global picker_display_rows, picker_total_content_height, picker_hover_row_index
+    global picker_display_rows, picker_total_content_height
     global picker_render_signature
 
     picker_display_rows = []
     picker_total_content_height = 0
-    picker_hover_row_index = None
+    picker_selection.hover_row_index = None
     picker_render_signature = None
     if picker_canvas is not None:
         picker_canvas.delete("all")
@@ -3206,36 +3056,18 @@ def draw_picker_cell(
         return
 
     font = font or get_picker_canvas_font(9, "bold")
-    picker_canvas.create_rectangle(
+    return draw_picker_cell_ui(
+        picker_canvas,
         x,
         y,
-        x + width,
-        y + height,
-        fill=bg,
-        outline="#0d1115",
-        width=1,
-    )
-
-    if anchor == "center":
-        text_x = x + width / 2
-        text_anchor = "center"
-        max_width = width - padx * 2
-    elif anchor == "w":
-        text_x = x + padx
-        text_anchor = "w"
-        max_width = width - padx * 2
-    else:
-        text_x = x + width - padx
-        text_anchor = "e"
-        max_width = width - padx * 2
-
-    picker_canvas.create_text(
-        text_x,
-        y + height / 2,
-        text=fit_picker_canvas_text(text, font, max_width),
-        fill=fg,
-        anchor=text_anchor,
-        font=font,
+        width,
+        height,
+        text,
+        font,
+        fg=fg,
+        bg=bg,
+        anchor=anchor,
+        padx=padx,
     )
 
 
@@ -3343,15 +3175,7 @@ def draw_picker_header_canvas(row):
 
 
 def get_picker_hover_bg(kind, key, default_bg):
-    if key == "history_sell":
-        return "#e1aa3f"
-    if kind == "flash" and key in ("sell", "buy"):
-        return "#18bfd8"
-    if kind == "flash" and key == "roi":
-        return "#88d47e"
-    if kind == "flash" and key == "profit":
-        return "#f6d847"
-    return "#16202a" if default_bg == "#101418" else default_bg
+    return get_picker_hover_bg_ui(kind, key, default_bg)
 
 
 def draw_picker_item_canvas(row, is_hover=False, is_pending=False):
@@ -3461,27 +3285,29 @@ def draw_picker_canvas_rows(selected_item_name=None, restore_selection=False):
             draw_picker_item_canvas(
                 row,
                 is_hover=(
-                    row_index == picker_hover_row_index
-                    or row_index == picker_selected_row_index
+                    row_index == picker_selection.hover_row_index
+                    or row_index == picker_selection.selected_row_index
                 ),
-                is_pending=(row_index == picker_pending_row_index),
+                is_pending=(row_index == pending_picker_selection.row_index),
             )
 
     picker_canvas.configure(scrollregion=(0, 0, width, max(total_height, 1)))
     picker_render_signature = get_picker_render_signature()
-    if decor_row_selected and picker_selected_row_index is not None:
-        scroll_picker_row_into_view(picker_display_rows[picker_selected_row_index])
+    if decor_row_selected and picker_selection.selected_row_index is not None:
+        scroll_picker_row_into_view(
+            picker_display_rows[picker_selection.selected_row_index]
+        )
 
 
 def show_picker_message(text):
-    global picker_display_rows, picker_total_content_height, picker_hover_row_index
-    global picker_selected_row_index, picker_render_signature
+    global picker_display_rows, picker_total_content_height
+    global picker_render_signature
 
     if picker_canvas is None:
         return
 
-    picker_hover_row_index = None
-    picker_selected_row_index = None
+    picker_selection.hover_row_index = None
+    picker_selection.selected_row_index = None
     picker_display_rows = [{"type": "separator", "text": text, "y": 0, "height": 34}]
     picker_total_content_height = 34
     picker_render_signature = ("message", text)
@@ -3568,8 +3394,6 @@ def scroll_picker_row_into_view(row):
 
 
 def select_picker_row(row_index, paste=True):
-    global picker_selected_row_index, picker_hover_row_index
-
     if row_index is None or row_index < 0 or row_index >= len(picker_display_rows):
         return
 
@@ -3578,8 +3402,7 @@ def select_picker_row(row_index, paste=True):
     if row.get("type") != "item" or not item:
         return
 
-    picker_selected_row_index = row_index
-    picker_hover_row_index = row_index
+    picker_selection.select(row_index)
     scroll_picker_row_into_view(row)
     draw_picker_hover(row_index)
     if paste:
@@ -3589,10 +3412,17 @@ def select_picker_row(row_index, paste=True):
             return
 
         cancel_pending_picker_selection(redraw=True)
-        if not ensure_market_ready_for_picker_selection():
-            return
-        reset_market_action_stage()
-        paste_item_name(item_name)
+
+        def paste_selection():
+            reset_market_action_stage()
+            paste_item_name(item_name)
+
+        run_picker_action_when_ready(
+            ensure_market_ready=lambda: (
+                ensure_market_ready_for_picker_selection()
+            ),
+            ready_action=paste_selection,
+        )
 
 
 def move_picker_selection(direction):
@@ -3603,10 +3433,10 @@ def move_picker_selection(direction):
     if not item_rows:
         return
 
-    if picker_selected_row_index not in item_rows:
+    if picker_selection.selected_row_index not in item_rows:
         target_index = item_rows[0] if direction > 0 else item_rows[-1]
     else:
-        current_position = item_rows.index(picker_selected_row_index)
+        current_position = item_rows.index(picker_selection.selected_row_index)
         next_position = (current_position + direction) % len(item_rows)
         target_index = item_rows[next_position]
 
@@ -3640,19 +3470,23 @@ def move_picker_selection_to_section(direction):
     if not section_first_rows:
         return
 
-    if picker_selected_row_index not in get_picker_item_row_indices():
+    if picker_selection.selected_row_index not in get_picker_item_row_indices():
         target_index = section_first_rows[0] if direction > 0 else section_first_rows[-1]
         select_picker_row(target_index, paste=True)
         return
 
     current_section_position = 0
     for position, row_index in enumerate(section_first_rows):
-        if row_index <= picker_selected_row_index:
+        if row_index <= picker_selection.selected_row_index:
             current_section_position = position
         else:
             break
 
-    if direction < 0 and picker_selected_row_index != section_first_rows[current_section_position]:
+    if (
+        direction < 0
+        and picker_selection.selected_row_index
+        != section_first_rows[current_section_position]
+    ):
         target_position = current_section_position
     else:
         target_position = (current_section_position + direction) % len(section_first_rows)
@@ -3674,22 +3508,18 @@ def draw_picker_hover(row_index):
 
 
 def on_picker_canvas_motion(event):
-    global picker_hover_row_index
-
     row_index, item = get_picker_canvas_item_at(event)
     new_index = row_index if item else None
-    if new_index == picker_hover_row_index:
+    if new_index == picker_selection.hover_row_index:
         return
 
-    picker_hover_row_index = new_index
-    draw_picker_hover(picker_hover_row_index)
+    picker_selection.hover_row_index = new_index
+    draw_picker_hover(picker_selection.hover_row_index)
     picker_canvas.configure(cursor="hand2" if item else "")
 
 
 def on_picker_canvas_leave(event):
-    global picker_hover_row_index
-
-    picker_hover_row_index = None
+    picker_selection.hover_row_index = None
     draw_picker_hover(None)
     if picker_canvas is not None:
         picker_canvas.configure(cursor="")
@@ -3776,13 +3606,11 @@ def create_picker_window():
 
 
 def set_picker_navigation_hotkeys(enabled):
-    global picker_actions_enabled
-
     enabled = bool(enabled)
-    if picker_actions_enabled == enabled:
+    if picker_input_state.actions_enabled == enabled:
         return
 
-    picker_actions_enabled = enabled
+    picker_input_state.actions_enabled = enabled
     hotkeys.set_picker_navigation(enabled)
 
 
@@ -3795,10 +3623,7 @@ def sync_picker_navigation_hotkeys():
 
 
 def reset_picker_selection():
-    global picker_selected_row_index, picker_hover_row_index
-
-    picker_selected_row_index = None
-    picker_hover_row_index = None
+    picker_selection.clear()
 
 
 def hide_picker():
@@ -3865,80 +3690,75 @@ def show_picker(toggle=True):
 
 
 def right_shift_worker():
-    global right_arrow_hold_active, right_arrow_hold_compensated, right_arrow_press_at
-    global right_arrow_was_down, right_ctrl_was_down
-    global up_arrow_was_down, up_arrow_press_at, up_arrow_hold_triggered
-    global down_arrow_was_down, down_arrow_press_at, down_arrow_hold_triggered
-
     while True:
         try:
-            picker_visible = picker_actions_enabled and is_picker_window_visible_fast()
+            picker_visible = picker_input_state.actions_enabled and is_picker_window_visible_fast()
 
             up_down = is_virtual_key_down(VK_UP)
-            if picker_visible and up_down and not up_arrow_was_down:
-                up_arrow_was_down = True
-                up_arrow_press_at = time.monotonic()
-                up_arrow_hold_triggered = False
-            if picker_visible and up_down and up_arrow_was_down and not up_arrow_hold_triggered:
-                if time.monotonic() - up_arrow_press_at >= PICKER_ARROW_EDGE_HOLD_SECONDS:
-                    up_arrow_hold_triggered = True
+            if picker_visible and up_down and not picker_input_state.up_arrow_was_down:
+                picker_input_state.up_arrow_was_down = True
+                picker_input_state.up_arrow_press_at = time.monotonic()
+                picker_input_state.up_arrow_hold_triggered = False
+            if picker_visible and up_down and picker_input_state.up_arrow_was_down and not picker_input_state.up_arrow_hold_triggered:
+                if time.monotonic() - picker_input_state.up_arrow_press_at >= PICKER_ARROW_EDGE_HOLD_SECONDS:
+                    picker_input_state.up_arrow_hold_triggered = True
                     root.after(0, lambda: move_picker_selection_to_section(-1))
             if not picker_visible or not up_down:
-                up_arrow_was_down = False
-                up_arrow_hold_triggered = False
+                picker_input_state.up_arrow_was_down = False
+                picker_input_state.up_arrow_hold_triggered = False
 
             down_down = is_virtual_key_down(VK_DOWN)
-            if picker_visible and down_down and not down_arrow_was_down:
-                down_arrow_was_down = True
-                down_arrow_press_at = time.monotonic()
-                down_arrow_hold_triggered = False
-            if picker_visible and down_down and down_arrow_was_down and not down_arrow_hold_triggered:
-                if time.monotonic() - down_arrow_press_at >= PICKER_ARROW_EDGE_HOLD_SECONDS:
-                    down_arrow_hold_triggered = True
+            if picker_visible and down_down and not picker_input_state.down_arrow_was_down:
+                picker_input_state.down_arrow_was_down = True
+                picker_input_state.down_arrow_press_at = time.monotonic()
+                picker_input_state.down_arrow_hold_triggered = False
+            if picker_visible and down_down and picker_input_state.down_arrow_was_down and not picker_input_state.down_arrow_hold_triggered:
+                if time.monotonic() - picker_input_state.down_arrow_press_at >= PICKER_ARROW_EDGE_HOLD_SECONDS:
+                    picker_input_state.down_arrow_hold_triggered = True
                     root.after(0, lambda: move_picker_selection_to_section(1))
             if not picker_visible or not down_down:
-                down_arrow_was_down = False
-                down_arrow_hold_triggered = False
+                picker_input_state.down_arrow_was_down = False
+                picker_input_state.down_arrow_hold_triggered = False
 
             right_down = is_virtual_key_down(VK_RIGHT)
 
-            if picker_visible and right_down and not right_arrow_was_down:
-                right_arrow_was_down = True
-                right_arrow_press_at = time.monotonic()
-                right_arrow_hold_active = False
-                right_arrow_hold_compensated = False
+            if picker_visible and right_down and not picker_input_state.right_arrow_was_down:
+                picker_input_state.right_arrow_was_down = True
+                picker_input_state.right_arrow_press_at = time.monotonic()
+                picker_input_state.right_arrow_hold_active = False
+                picker_input_state.right_arrow_hold_compensated = False
 
-            if picker_visible and right_down and right_arrow_was_down and not right_arrow_hold_active:
-                held_for = time.monotonic() - right_arrow_press_at
+            if picker_visible and right_down and picker_input_state.right_arrow_was_down and not picker_input_state.right_arrow_hold_active:
+                held_for = time.monotonic() - picker_input_state.right_arrow_press_at
                 if held_for >= RIGHT_ARROW_HOLD_SECONDS and get_picker_action_hwnd():
                     stage = detect_market_action_stage()
                     if stage == STAGE_QUANTITY and not is_market_safe_buy_guard_active():
                         if (
-                            right_arrow_last_action_stage == STAGE_QUANTITY
-                            and not right_arrow_hold_compensated
+                            picker_input_state.right_arrow_last_action_stage == STAGE_QUANTITY
+                            and not picker_input_state.right_arrow_hold_compensated
                         ):
                             decrease_market_item_quantity()
-                            right_arrow_hold_compensated = True
+                            picker_input_state.right_arrow_hold_compensated = True
                         if set_order_button_hold(True):
-                            right_arrow_hold_active = True
+                            picker_input_state.right_arrow_hold_active = True
 
-            if (not picker_visible or not right_down) and (right_arrow_was_down or right_arrow_hold_active):
-                if right_arrow_hold_active or right_shift_order_down:
+            if (not picker_visible or not right_down) and (picker_input_state.right_arrow_was_down or picker_input_state.right_arrow_hold_active):
+                if picker_input_state.right_arrow_hold_active or right_shift_order_down:
                     set_order_button_hold(False)
-                right_arrow_was_down = False
-                right_arrow_hold_active = False
-                right_arrow_hold_compensated = False
+                picker_input_state.right_arrow_was_down = False
+                picker_input_state.right_arrow_hold_active = False
+                picker_input_state.right_arrow_hold_compensated = False
 
             right_ctrl_down = is_virtual_key_down(VK_RCONTROL)
-            if right_ctrl_down and not right_ctrl_was_down:
+            if right_ctrl_down and not picker_input_state.right_ctrl_was_down:
                 if picker_visible and get_picker_action_hwnd():
                     handle_right_ctrl_escape()
-            right_ctrl_was_down = right_ctrl_down
+            picker_input_state.right_ctrl_was_down = right_ctrl_down
 
             end_down = is_virtual_key_down(VK_END)
             end_ready_to_release = (
-                not picker_end_latched
-                or time.monotonic() - picker_end_press_at >= PICKER_END_RELEASE_GRACE_SECONDS
+                not picker_input_state.end_latched
+                or time.monotonic() - picker_input_state.end_press_at >= PICKER_END_RELEASE_GRACE_SECONDS
             )
             if not end_down and end_ready_to_release:
                 finish_picker_end_press()
@@ -3977,19 +3797,19 @@ def check_hotkeys():
             handle_salvage_del_press()
         elif event == "picker_up":
             if should_enable_picker_navigation_hotkeys():
-                if not up_arrow_hold_triggered:
+                if not picker_input_state.up_arrow_hold_triggered:
                     move_picker_selection(-1)
             else:
                 sync_picker_navigation_hotkeys()
         elif event == "picker_down":
             if should_enable_picker_navigation_hotkeys():
-                if not down_arrow_hold_triggered:
+                if not picker_input_state.down_arrow_hold_triggered:
                     move_picker_selection(1)
             else:
                 sync_picker_navigation_hotkeys()
         elif event == "picker_right":
             if should_enable_picker_navigation_hotkeys():
-                if not right_arrow_hold_active:
+                if not picker_input_state.right_arrow_hold_active:
                     handle_market_action_right()
             else:
                 sync_picker_navigation_hotkeys()

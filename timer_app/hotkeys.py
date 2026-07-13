@@ -1,4 +1,5 @@
 import ctypes
+from dataclasses import dataclass
 import queue
 import threading
 import time
@@ -32,6 +33,36 @@ PICKER_ACTION_HOTKEYS = (
     (PICKER_RIGHT_HOTKEY_ID, VK_RIGHT, "picker_right"),
     (PICKER_LEFT_HOTKEY_ID, VK_LEFT, "picker_left"),
 )
+
+
+@dataclass
+class PickerInputState:
+    """Mutable latches used by Picker hotkey polling and End handling."""
+
+    actions_enabled: bool = False
+    right_ctrl_was_down: bool = False
+    right_arrow_was_down: bool = False
+    right_arrow_press_at: float = 0
+    right_arrow_hold_active: bool = False
+    right_arrow_hold_compensated: bool = False
+    right_arrow_last_action_stage: str | None = None
+    up_arrow_was_down: bool = False
+    up_arrow_press_at: float = 0
+    up_arrow_hold_triggered: bool = False
+    down_arrow_was_down: bool = False
+    down_arrow_press_at: float = 0
+    down_arrow_hold_triggered: bool = False
+    end_hold_pending: bool = False
+    end_hold_consumed: bool = False
+    end_press_active: bool = False
+    end_press_was_open: bool = False
+    end_started_in_game: bool = False
+    end_hold_triggered: bool = False
+    end_background_hold_triggered: bool = False
+    end_latched: bool = False
+    end_press_at: float = 0
+    end_ignore_until: float = 0
+    end_previous_hwnd: int = 0
 
 
 class HotkeyWorker:

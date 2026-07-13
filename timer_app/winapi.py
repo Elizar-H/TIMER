@@ -265,5 +265,33 @@ def get_screen_pixel_rgb(x, y):
         ctypes.windll.user32.ReleaseDC(0, hdc)
 
 
+def get_screen_pixels_rgb(points):
+    """Reads one group of screen pixels through a single desktop DC."""
+    if not points:
+        return []
+
+    hdc = ctypes.windll.user32.GetDC(0)
+    if not hdc:
+        return [None for _point in points]
+
+    try:
+        pixels = []
+        for x, y in points:
+            color = ctypes.windll.gdi32.GetPixel(hdc, int(x), int(y))
+            if color == -1:
+                pixels.append(None)
+            else:
+                pixels.append(
+                    (
+                        color & 0xFF,
+                        (color >> 8) & 0xFF,
+                        (color >> 16) & 0xFF,
+                    )
+                )
+        return pixels
+    finally:
+        ctypes.windll.user32.ReleaseDC(0, hdc)
+
+
 def is_virtual_key_down(vk):
     return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)

@@ -1,16 +1,56 @@
 """Picker data loading and item-building pipeline.
 
-This module deliberately has no application or UI state.  The application
-passes its existing network, parsing, settings and logging functions to
-``PickerDataService``.  Keeping those dependencies explicit makes it possible
-to move the pipeline out of ``app.py`` without changing its ordering or
-fallback behavior.
+This module deliberately has no application imports or UI operations. The
+application passes its existing dependencies explicitly, while the small
+state objects contain data only.
 """
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import threading
 import time
+
+
+@dataclass
+class PendingPickerSelectionState:
+    """Generation and row marker for deferred Picker selection."""
+
+    token: int = 0
+    row_index: int | None = None
+
+    def cancel(self):
+        """Invalidates queued callbacks and clears the pending marker."""
+        self.token += 1
+        self.row_index = None
+
+    def begin(self, row_index):
+        """Starts a new generation and returns its captured token."""
+        self.token += 1
+        self.row_index = row_index
+        return self.token
+
+    def complete_if_current(self, token):
+        """Clears the current marker without affecting a newer generation."""
+        if token != self.token:
+            return False
+        self.row_index = None
+        return True
+
+
+@dataclass
+class PickerSelectionState:
+    """Selected and hover row indices owned by the Picker UI."""
+
+    selected_row_index: int | None = None
+    hover_row_index: int | None = None
+
+    def select(self, row_index):
+        self.selected_row_index = row_index
+        self.hover_row_index = row_index
+
+    def clear(self):
+        self.selected_row_index = None
+        self.hover_row_index = None
 
 
 @dataclass
