@@ -312,7 +312,7 @@ PASTE_BETWEEN_KEYS_DELAY = 0.002
 PASTE_BEFORE_ENTER_DELAY = 0.040
 PASTE_ENTER_KEY_DELAY = 0.005
 PASTE_SEARCH_CLICKS = 2
-SECOND_SEARCH_RESULT_ITEM_NAMES = {"око", "череп"}
+SECOND_SEARCH_RESULT_ITEM_NAMES = {"декоративная решетка 2", "око", "череп"}
 MOUSE_CLICK_DELAY = 0.003
 ITEM_PICKER_TITLE = "Crossout Item Picker"
 # Вид основной "челки"
@@ -1760,6 +1760,10 @@ def read_market_tab_probe():
     return read_screen_point_rgb("market.market_tab")
 
 
+def read_market_details_view_probe():
+    return read_screen_point_rgb("market.details_view_probe")
+
+
 def is_market_tab_active_pixel(rgb):
     return matches_market_tab_active_pixel(
         rgb,
@@ -1772,6 +1776,10 @@ def is_market_view_active():
     return is_market_tab_active_pixel(read_market_tab_probe())
 
 
+def is_market_details_view_active():
+    return is_orange_button_pixel(read_market_details_view_probe())
+
+
 def ensure_market_view_before_picker_navigation():
     if not get_picker_action_hwnd():
         return False
@@ -1780,15 +1788,14 @@ def ensure_market_view_before_picker_navigation():
         return False
 
     market_rgb = read_market_tab_probe()
-    if (
-        is_market_tab_active_pixel(market_rgb)
-        and market_current_subtab == MARKET_SUBTAB_DETAILS
-    ):
+    details_rgb = read_market_details_view_probe()
+    if is_orange_button_pixel(details_rgb):
         return True
 
     append_log_line(
         "market navigation: open market details "
-        f"market_rgb={market_rgb}"
+        f"market_rgb={market_rgb} details_rgb={details_rgb} "
+        f"cached_subtab={market_current_subtab}"
     )
     return open_game_market_details()
 
@@ -2152,7 +2159,7 @@ def handle_right_ctrl_escape():
     if not ensure_market_order_panel_closed():
         return False
 
-    if market_current_subtab == MARKET_SUBTAB_DETAILS:
+    if is_market_details_view_active():
         ok = open_game_market_lots()
     else:
         ok = open_game_market_details()

@@ -69,6 +69,11 @@
     "y": 186,
     "description": "Details tab in the market view."
   },
+  "market.details_view_probe": {
+    "x": 1600,
+    "y": 238,
+    "description": "Orange pixel probe that indicates the market details tab is active."
+  },
   "market.lots_tab": {
     "x": 1930,
     "y": 184,

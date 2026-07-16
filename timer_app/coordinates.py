@@ -85,6 +85,11 @@ DEFAULT_COORDINATES = {
         186,
         "Details tab in the market view.",
     ),
+    "market.details_view_probe": _pixel_point(
+        1600,
+        238,
+        "Orange pixel probe that indicates the market details tab is active.",
+    ),
     "market.lots_tab": _pixel_point(
         1930,
         184,
