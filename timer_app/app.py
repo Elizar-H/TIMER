@@ -2360,9 +2360,14 @@ def restore_salvage_sort_type(hwnd=None):
         append_log_line("salvage stop cleanup failed: sort type")
         return False
 
-    append_log_line("salvage stop cleanup: finish click")
-    if not salvage_click_no_stop("salvage.stop_finish_click", hwnd=target_hwnd):
-        append_log_line("salvage stop cleanup failed: finish click")
+    append_log_line("salvage stop cleanup: collapse decor")
+    if not salvage_click_no_stop("salvage.decor_category", hwnd=target_hwnd):
+        append_log_line("salvage stop cleanup failed: collapse decor")
+        return False
+
+    append_log_line("salvage stop cleanup: resources category")
+    if not salvage_click_no_stop("salvage.resources_category", hwnd=target_hwnd):
+        append_log_line("salvage stop cleanup failed: resources category")
         return False
 
     return True
@@ -3411,6 +3416,7 @@ def select_picker_row(row_index, paste=True):
 
     picker_selection.select(row_index)
     scroll_picker_row_into_view(row)
+    render_signature = get_picker_render_signature()
     draw_picker_hover(row_index)
     if paste:
         clear_pending_picker_refresh_paste()
@@ -3418,7 +3424,14 @@ def select_picker_row(row_index, paste=True):
         if begin_pending_picker_selection(row_index, item_name):
             return
 
-        cancel_pending_picker_selection(redraw=True)
+        # Include refreshes during the first draw: it records its signature
+        # after building the rows, when the source may already have changed.
+        needs_redraw = (
+            pending_picker_selection.row_index is not None
+            or picker_render_signature != render_signature
+            or render_signature != get_picker_render_signature()
+        )
+        cancel_pending_picker_selection(redraw=needs_redraw)
 
         def paste_selection():
             reset_market_action_stage()

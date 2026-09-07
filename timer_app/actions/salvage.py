@@ -93,11 +93,6 @@ class SalvageWorkflow:
                 return
             if not dependencies.click("salvage.details_tab", stop_event):
                 return
-            if not dependencies.click(
-                "salvage.pre_decor_category",
-                stop_event,
-            ):
-                return
             if not dependencies.click("salvage.decor_category", stop_event):
                 return
             if not dependencies.click("salvage.sort_dropdown", stop_event):
@@ -134,6 +129,11 @@ class SalvageWorkflow:
                     dependencies.append_log_line(
                         "salvage stopped: confirm button not found"
                     )
+                    with state.lifecycle_lock:
+                        # An empty list can resemble a menu to the pixel probe.
+                        # Return to resources unless the user cancelled the run.
+                        if not stop_event.is_set():
+                            state.cleanup_requested = True
                     break
 
                 if not dependencies.click("salvage.all_button", stop_event):

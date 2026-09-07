@@ -121,8 +121,8 @@ DEFAULT_COORDINATES = {
         "Storage tab before salvage actions.",
     ),
     "salvage.details_tab": _pixel_point(
-        1256,
-        181,
+        1450,
+        200,
         "Details tab before salvage actions.",
     ),
     "salvage.pre_decor_category": _pixel_point(
@@ -131,9 +131,14 @@ DEFAULT_COORDINATES = {
         "TODO_NAMING_REVIEW: preliminary click before selecting decor category.",
     ),
     "salvage.decor_category": _pixel_point(
-        1311,
-        364,
+        150,
+        1150,
         "Decor category in storage.",
+    ),
+    "salvage.resources_category": _pixel_point(
+        150,
+        1400,
+        "Resources category in storage after salvage.",
     ),
     "salvage.sort_dropdown": _pixel_point(
         3419,
@@ -151,38 +156,38 @@ DEFAULT_COORDINATES = {
         "Sort by type option.",
     ),
     "salvage.first_item": _pixel_point(
-        257,
-        691,
+        1000,
+        600,
         "First salvageable item in the storage list.",
     ),
     "salvage.selected_item": _pixel_point(
-        257,
-        691,
+        1000,
+        600,
         "Selected salvage item in the storage list.",
     ),
     "salvage.context_disassemble": _pixel_point(
-        230,
-        1310,
+        973,
+        1219,
         "Disassemble action in the item context menu.",
     ),
     "salvage.context_disassemble_probe_top": _pixel_point(
-        271,
-        1221,
+        1014,
+        1130,
         "White pixel probe for the upper disassemble menu option.",
     ),
     "salvage.context_disassemble_option_top": _pixel_point(
-        230,
-        1315,
+        973,
+        1224,
         "Upper disassemble menu option selected when the upper probe is white.",
     ),
     "salvage.context_disassemble_probe_bottom": _pixel_point(
-        271,
-        1317,
+        1014,
+        1226,
         "White pixel probe for the lower disassemble menu option.",
     ),
     "salvage.context_disassemble_option_bottom": _pixel_point(
-        231,
-        1402,
+        974,
+        1311,
         "Lower disassemble menu option selected when the lower probe is white.",
     ),
     "salvage.all_button": _pixel_point(
